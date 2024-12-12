@@ -17,7 +17,7 @@ O_NONBLOCK: equ 0x0004
 
 ;screen clean definition
 row_cells:	equ 32	; set to any (reasonable) value you wish
-column_cells: 	equ 80 ; set to any (reasonable) value you wish
+column_cells: 	equ 54 ; set to any (reasonable) value you wish
 array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to bytes in the array and a new line char ends each row
 
 ;This is regarding the sleep time
@@ -227,11 +227,15 @@ right_direction: equ 1
 
 
 section .data
-	pallet_position dq board + 40 + 29 * (column_cells +2)
+	pallet_position dq board + 25 + 28 * (column_cells +2)
 	pallet_size dq 3
 
-	ball_x_pos: dq 40
-	ball_y_pos: dq 28
+	ball_x_pos: dq 26
+	ball_y_pos: dq 27
+
+	; Bloques 
+	block1: db 'OOOO', 0
+	block2: db 'UUUU', 0
 
 
 section .text
@@ -257,8 +261,6 @@ print_ball:
 
 
 	;mov rax, board + r8 + r9 * (column_cells + 2)
-
-
 
 
 ;	Function: print_pallet
@@ -303,14 +305,80 @@ move_pallet:
 	.end:
 	ret
 
+; Funcion: Dibujar bloques
+draw_blocks_m:
+	push rbx
+	push rdx
+	push r12
+	push r13
+
+	mov r8, board 
+	add r8, (column_cells + 3)*6  
+	sub r8, 5                         ; Iniciar 6 filas debajo del limite superior
+	mov r10, 6                        ; Filas
+	lea r12, [block1]      		  ; Guarda la direccion de memoria del bloque 1
+	lea r13, [block2]                 ; Guarda la direccion de memoria del bloque 2
+	xor rbx, rbx                      ; Para alternar entre bloque 1 y bloque 2
+
+.loop_rows:
+    cmp r10, 0
+    je .blocks_done
+
+    mov r11, 13                       ; Columnas
+    push r8                           ; Posicion inicial de la fila
+
+.loop_columns:
+    cmp r11, 0
+    je .next_row
+	test rbx, 1						  ; Si el resultado es 0 dibuja el bloque 1, si es 1 dibuja el bloque 2
+	jz .draw_block1
+
+.draw_block2:
+    mov rsi, r13              		  ; Usa bloque 2 (UUUU)
+    jmp .draw_block
+
+.draw_block1:
+    mov rsi, r12                      ; Usa bloque 1 (OOOO)
+
+.draw_block:
+    mov rcx, 4                        ; Contador para los 4 caracteres
+
+.draw_chars:
+    mov al, byte [rsi]                ; Copia un caracter del bloque
+    mov byte [r8], al				  ; Copia el caracter a la posicion del tablero
+    inc rsi							  
+    inc r8
+    dec rcx
+    jnz .draw_chars					  ; Repite hasta que se dibujen todos los caracteres
+
+    not rbx                  		  ; Cambiar el bloque para la siguiente iteracion
+    dec r11
+    jmp .loop_columns
+
+.next_row:
+    pop r8                            ; Recupera la posicion inicial de la fila
+    add r8, column_cells + 2          ; Avanza a la siguiente fila
+    dec r10
+    jmp .loop_rows
+
+.blocks_done:
+    pop r13
+    pop r12
+    pop rdx
+    pop rbx
+    ret
+
+
 _start:
 	call canonical_off
 	print clear, clear_length
 	call start_screen
 
+
 	.main_loop:
 		call print_pallet
 		call print_ball
+		call draw_blocks_m
 		print board, board_size
 		;setnonblocking
 	.read_more:
