@@ -18,6 +18,7 @@ O_NONBLOCK: equ 0x0004
 ;screen clean definition
 row_cells:	equ 32	; set to any (reasonable) value you wish
 column_cells: 	equ 54 ; set to any (reasonable) value you wish
+column_cells2: 	equ 20 ; Para el marcador de vidas, puntaje y nivel
 array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to bytes in the array and a new line char ends each row
 
 ;This is regarding the sleep time
@@ -72,15 +73,20 @@ msg8_length:	equ $-msg8
 
 %macro full_line 0
     times column_cells db "X"
+	db " "                    ; Espacio entre el cuadro de juego y de puntaje
+	times column_cells2 db "X"
     db 0x0a, 0xD
 %endmacro
 
 %macro hollow_line 0
     db "X"
     times column_cells-2 db " "
-    db "X", 0x0a, 0xD
+    db "X"
+	db " "
+	db "X"
+	times column_cells2-2 db " "
+	db "X", 0x0a, 0xD
 %endmacro
-
 
 %macro print 2
 	mov eax, sys_write
@@ -227,15 +233,27 @@ right_direction: equ 1
 
 
 section .data
-	pallet_position dq board + 25 + 28 * (column_cells +2)
+	pallet_position dq board -23 + 28 * (column_cells+column_cells2 +2)
 	pallet_size dq 3
 
-	ball_x_pos: dq 26
-	ball_y_pos: dq 27
+	ball_x_pos: dq -43
+	ball_y_pos: dq 37
 
 	; Bloques 
 	block1: db 'OOOO', 0
 	block2: db 'UUUU', 0
+
+	; Textos para el marcador
+    score_text db "PUNTAJE: "
+    score_length equ $ - score_text
+    level_text db "NIVEL: "
+    level_length equ $ - level_text
+    lives_text db "VIDAS: "
+    lives_length equ $ - lives_text
+
+    current_score dq 0
+    current_level dq 1
+    current_lives dq 5
 
 
 section .text
@@ -291,16 +309,21 @@ move_pallet:
 	cmp rdi, left_direction
 	jne .move_right
 	.move_left:
-		mov r8, [pallet_position]
-		mov r9, [pallet_size]
-		mov byte [r8 + r9 - 1], char_space
-		dec r8
-		mov [pallet_position], r8
+		mov r8, [pallet_position]  ; Posicion de la paleta
+		cmp byte[r8-1], 'X'        ; Comprobar si hay una X que indique el limite del area de juego
+		je .end                    ; Si hay una X no permite moverse mas
+		mov r9, [pallet_size]	   ; Tamano de la paleta
+		mov byte [r8 + r9 - 1], char_space ; Coloca un espacio en la utlima posicion
+		dec r8  				   ; Mueve la paleta un espacio hacia la izquierda
+		mov [pallet_position], r8  ; Guarda la nueva posicion
 		jmp .end
 	.move_right:
 		mov r8, [pallet_position]
+		mov r9, [pallet_size]
+		cmp byte [r8+r9], 'X'      ; Comprobar si hay una X que indique el limite del area de juego
+		je .end					   ; Si hay una X no permite moverse mas
 		mov byte [r8], char_space
-		inc r8
+		inc r8					   ; Mueve la paleta un espacio hacia la derecha
 		mov [pallet_position], r8
 	.end:
 	ret
@@ -313,10 +336,10 @@ draw_blocks_m:
 	push r13
 
 	mov r8, board 
-	add r8, (column_cells + 3)*6  
-	sub r8, 5                         ; Iniciar 6 filas debajo del limite superior
+	add r8, ((column_cells+3)+(column_cells2 + 3))*6  
+	sub r8, 17                         ; Iniciar 6 filas debajo del limite superior
 	mov r10, 6                        ; Filas
-	lea r12, [block1]      		  ; Guarda la direccion de memoria del bloque 1
+	lea r12, [block1]      			  ; Guarda la direccion de memoria del bloque 1
 	lea r13, [block2]                 ; Guarda la direccion de memoria del bloque 2
 	xor rbx, rbx                      ; Para alternar entre bloque 1 y bloque 2
 
@@ -357,7 +380,7 @@ draw_blocks_m:
 
 .next_row:
     pop r8                            ; Recupera la posicion inicial de la fila
-    add r8, column_cells + 2          ; Avanza a la siguiente fila
+    add r8, column_cells+column_cells2 + 3   ; Avanza a la siguiente fila
     dec r10
     jmp .loop_rows
 
@@ -367,6 +390,95 @@ draw_blocks_m:
     pop rdx
     pop rbx
     ret
+
+; Funcion: Mostrar la puntuacion
+score_info:
+	push rbx
+	push rdx
+	push r12
+	push r13
+
+	mov r8, board
+	add r8, (column_cells+5)*5       
+	sub r8, 5						; Se ubica la posicion donde se quiere ubicar el puntaje
+	mov rsi, score_text			    ; Texto 'PUNTAJE'
+	mov rcx, score_length			; Longitud del texto
+	call write_score				; Se llama a la funcion para escribir el texto correspondiente
+
+	mov rdi, [current_score]		; Valor actual del puntaje
+    call num_to_str					; Se llama a la funcion para convertir numeros a texto
+
+	add r8, (column_cells+5)*10
+	add r8, 16						; Se ubica la posicion donde se quiere ubicar el nivel
+
+	mov rsi, level_text				; Texto 'NIVEL'
+	mov rcx, level_length			; Longitud del texto
+	call write_score
+
+	mov rdi, [current_level]		; Valor del nivel actual
+    call num_to_str
+
+	add r8, (column_cells+5)*15		
+	sub r8, 46						; Se ubica la posicion donde se quieren ubicar las vidas
+
+	mov rsi, lives_text				; Texto 'VIDAS'
+	mov rcx, lives_length			; Longitud del texto
+	call write_score
+
+	mov rdi, [current_lives]		; Valor de vidas actuales
+    call num_to_str
+
+	pop r13
+	pop r12
+	pop rdx
+	pop rbx
+	ret
+
+; Funcion para convertir numero a string
+num_to_str:
+	push rbx
+	push rdx
+	mov rbx, 10			; Divisor para obtener los digitos
+	mov rax, rdi        ; Numero a convertir (niveles, vidas o puntos)
+    xor rcx, rcx        ; Contador de digitos
+    
+.divide_loop:
+    xor rdx, rdx        ; Limpiar rdx para la division
+    div rbx             ; Dividir por 10
+    push rdx            ; Guardar el residuo en el stack
+    inc rcx             ; Incrementar contador
+    test rax, rax       ; Verificar si quedan digitos
+    jnz .divide_loop
+    
+.write_loop:
+    pop rdx             ; Obtener digitos del stack
+    add dl, '0'         ; Convertir a ASCII
+    mov [r8], dl        ; Escribir digito
+    inc r8              ; Siguiente espacio en memoria
+    dec rcx             ; Decrementar contador
+    jnz .write_loop
+    
+    pop rdx
+    pop rbx
+    ret
+
+; Funcion para escribir texto
+write_score:
+    push rcx
+    push rsi
+    
+.write_loop:
+    mov al, byte [rsi]
+    mov [r8], al
+    inc rsi
+    inc r8
+    dec rcx
+    jnz .write_loop
+    
+    pop rsi
+    pop rcx
+    ret
+
 
 
 _start:
@@ -379,6 +491,7 @@ _start:
 		call print_pallet
 		call print_ball
 		call draw_blocks_m
+		call score_info
 		print board, board_size
 		;setnonblocking
 	.read_more:
