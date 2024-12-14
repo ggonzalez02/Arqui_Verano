@@ -89,10 +89,10 @@ msg8_length:	equ $-msg8
 %endmacro
 
 %macro print 2
-	mov eax, sys_write
-	mov edi, 1 	; stdout
+	mov rax, sys_write
+	mov rdi, 1 	; stdout
 	mov rsi, %1
-	mov edx, %2
+	mov rdx, %2
 	syscall
 %endmacro
 
@@ -105,9 +105,9 @@ msg8_length:	equ $-msg8
 %endmacro
 
 %macro sleeptime 0
-	mov eax, sys_nanosleep
+	mov rax, sys_nanosleep
 	mov rdi, timespec
-	xor esi, esi		; ignore remaining time in case of call interruption
+	xor rsi, rsi		; ignore remaining time in case of call interruption
 	syscall			; sleep for tv_sec seconds + tv_nsec nanoseconds
 %endmacro
 
@@ -145,9 +145,9 @@ canonical_off:
 
         ; clear canonical bit in local mode flags
         push rax
-        mov eax, ICANON
-        not eax
-        and [termios+12], eax
+        mov rax, ICANON
+        not rax
+        and [termios+12], rax
 		mov byte[termios+CC_C+VTIME], 0
 		mov byte[termios+CC_C+VMIN], 0
         pop rax
@@ -160,9 +160,9 @@ echo_off:
 
         ; clear echo bit in local mode flags
         push rax
-        mov eax, ECHO
-        not eax
-        and [termios+12], eax
+        mov rax, ECHO
+        not rax
+        and [termios+12], rax
         pop rax
 
         call write_stdin_termios
@@ -193,10 +193,10 @@ read_stdin_termios:
         push rcx
         push rdx
 
-        mov eax, 36h
-        mov ebx, stdin
-        mov ecx, 5401h
-        mov edx, termios
+        mov rax, 36h
+        mov rbx, stdin
+        mov rcx, 5401h
+        mov rdx, termios
         int 80h
 
         pop rdx
@@ -211,10 +211,10 @@ write_stdin_termios:
         push rcx
         push rdx
 
-        mov eax, 36h
-        mov ebx, stdin
-        mov ecx, 5402h
-        mov edx, termios
+        mov rax, 36h
+        mov rbx, stdin
+        mov rcx, 5402h
+        mov rdx, termios
         int 80h
 
         pop rdx
