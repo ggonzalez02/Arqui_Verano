@@ -313,7 +313,7 @@ move_pallet:
 		cmp byte[r8-1], 'X'        ; Comprobar si hay una X que indique el limite del area de juego
 		je .end                    ; Si hay una X no permite moverse mas
 		mov r9, [pallet_size]	   ; Tamano de la paleta
-		mov byte [r8 + r9 - 1], char_space ; Coloca un espacio en la utlima posicion
+		mov byte [r8 + r9 - 1], char_space ; Coloca un espacio en la ultima posicion
 		dec r8  				   ; Mueve la paleta un espacio hacia la izquierda
 		mov [pallet_position], r8  ; Guarda la nueva posicion
 		jmp .end
@@ -400,7 +400,7 @@ score_info:
 
 	mov r8, board
 	add r8, (column_cells+5)*5       
-	sub r8, 5						; Se ubica la posicion donde se quiere ubicar el puntaje
+	sub r8, 5						; Se ubica la posicion donde se quiere colocar el puntaje
 	mov rsi, score_text			    ; Texto 'PUNTAJE'
 	mov rcx, score_length			; Longitud del texto
 	call write_score				; Se llama a la funcion para escribir el texto correspondiente
@@ -409,7 +409,7 @@ score_info:
     call num_to_str					; Se llama a la funcion para convertir numeros a texto
 
 	add r8, (column_cells+5)*10
-	add r8, 16						; Se ubica la posicion donde se quiere ubicar el nivel
+	add r8, 16						; Se ubica la posicion donde se quiere colocar el nivel
 
 	mov rsi, level_text				; Texto 'NIVEL'
 	mov rcx, level_length			; Longitud del texto
@@ -419,7 +419,7 @@ score_info:
     call num_to_str
 
 	add r8, (column_cells+5)*15		
-	sub r8, 46						; Se ubica la posicion donde se quieren ubicar las vidas
+	sub r8, 46						; Se ubica la posicion donde se quieren colocar las vidas
 
 	mov rsi, lives_text				; Texto 'VIDAS'
 	mov rcx, lives_length			; Longitud del texto
@@ -440,7 +440,7 @@ num_to_str:
 	push rdx
 	mov rbx, 10			; Divisor para obtener los digitos
 	mov rax, rdi        ; Numero a convertir (niveles, vidas o puntos)
-    xor rcx, rcx        ; Contador de digitos
+    xor rcx, rcx        ; Contador
     
 .divide_loop:
     xor rdx, rdx        ; Limpiar rdx para la division
