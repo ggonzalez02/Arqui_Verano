@@ -24,7 +24,7 @@ array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to byt
 ;This is regarding the sleep time
 timespec:
     tv_sec  dq 0
-    tv_nsec dq 2000000
+    tv_nsec dq 70000000
 
 
 ;This is for cleaning up the screen
@@ -236,8 +236,10 @@ section .data
 	pallet_position dq board -23 + 28 * (column_cells+column_cells2 +2)
 	pallet_size dq 3
 
-	ball_x_pos: dq -43
-	ball_y_pos: dq 37
+    ball_x_pos: dq 52
+	ball_y_pos: dq 26
+    ball_x_direction: db 1  ; + derecha, - izquierda
+    ball_y_direction: db 1  ; + abajo, - arriba
 
 	; Bloques 
 	block1: db 'OOOO', 0
@@ -264,21 +266,79 @@ section .text
 ;
 ; Return:
 ;	Void
+
 print_ball:
-	mov r8, [ball_x_pos]
-	mov r9, [ball_y_pos]
-	add r8, board
+    mov r8, board           ; Carga la direccion del tablero
+	mov r9, [ball_y_pos]    ; Carga la posicion y de la bola
+    mov rax, column_cells + column_cells2 + 2 ; Ancho total de la consola
+	mul r9                  ; Multiplica la posicion y por el ancho para obtener el offset de la fila
+    add rax, [ball_x_pos]   ; Se suma la posicion x para tener la posicion de la bola
+    add r8, rax             ; Posicion de memoria donde se va a dibujar la bola
 
-	mov rcx, r9
-	mov rax, column_cells + 2
-	imul rcx
+    mov r10, board          
+    add r10, board_size     ; Direccion final del tablero
+    ; Compara con los bordes del tablero para que la bola se mantenga dentro de este
+    cmp r8, board           ; Se compara la posicion de la bola con la posicion inicial del tablero
+    jl .exit_ball           ; Si es menor no se dibuja la bola
+    cmp r8, r10             ; Se compara la posicion de la bola con la posicion final del tablero
+    jg .exit_ball           ; Si es mayor no se dibuja la bola
+    
+    cmp byte [r8], 'X'      ; Comparar para saber si se llego a un limite del area de juego
+    je .exit_ball           ; Si se llega al borde no se dibuja la bola
 
-	add r8, rax
-	mov byte [r8], char_O
+    mov byte [r8], '0'      ; Si no esta en el borde dibuja la bola
+
+.exit_ball:
 	ret
 
+; Funcion: Mover la bola incluyendo los rebotes en los bordes
+move_ball:
+    mov r8, board
+    mov r9, [ball_y_pos]
+    mov rax, column_cells + column_cells2 + 2
+    mul r9
+    add rax, [ball_x_pos]
+    add r8, rax
+    
+    mov byte [r8], ' '    ; Borrar posicion actual de la bola
 
-	;mov rax, board + r8 + r9 * (column_cells + 2)
+    mov rax, [ball_x_pos] ; Posicion x actual
+    movsx rbx, byte [ball_x_direction] ; Carga la direccion con signo (der o izq)
+    add rax, rbx          ; Calcula nueva posicion (sumando la direccion y la posicion)
+    mov rcx, [ball_y_pos] ; Posicion y actual
+
+    mov r10, rax          ; Guarda nueva posicion en x
+    mov rax, column_cells + column_cells2 + 2
+    mul rcx               ; Multiplica y actual por el ancho de la consola
+    add rax, r10          ; Se suman la posicion x y la multiplicacion anterior
+    lea r8, [board + rax] ; Obtiene la direccion con el desplazamiento (posicion actual)
+
+    cmp byte [r8], 'X'    ; Compara la posicion actual con el borde del area de juego
+    jne .move_x           ; Si no esta en el borde, pasa a la funcion move_x
+    neg byte [ball_x_direction]  ; Si esta en el borde direccion la direccion de x
+    jmp .check_y          
+
+.move_x:
+    mov [ball_x_pos], r10  ; Actualiza la posicion de la bola
+
+.check_y:
+    mov rax, [ball_y_pos]  ; Guarda la posicion actual en y
+    movsx rbx, byte [ball_y_direction] ; Carga la direccion con signo (arriba o abajo)
+    add rax, rbx          ; Calcula nueva posicion
+    mov r10, rax          ; Guarda la nueva posicion
+    mov rax, column_cells + column_cells2 + 2  
+    mul r10               ; Multiplica la posicion y por el ancho de la consola
+    add rax, [ball_x_pos] ; A la posicion en y se le suma la posicion en x
+    lea r8, [board + rax] ; Se obtiene la direccion en la consola
+
+    cmp byte [r8], 'X'
+    jne .move_y
+    neg byte [ball_y_direction]   
+    ret
+
+.move_y:
+    mov [ball_y_pos], r10  ; Actualiza posicion en y
+    ret
 
 
 ;	Function: print_pallet
@@ -337,7 +397,7 @@ draw_blocks_m:
 
 	mov r8, board 
 	add r8, ((column_cells+3)+(column_cells2 + 3))*6  
-	sub r8, 17                         ; Iniciar 6 filas debajo del limite superior
+	sub r8, 17                        ; Iniciar 6 filas debajo del limite superior
 	mov r10, 6                        ; Filas
 	lea r12, [block1]      			  ; Guarda la direccion de memoria del bloque 1
 	lea r13, [block2]                 ; Guarda la direccion de memoria del bloque 2
@@ -488,12 +548,14 @@ _start:
 
 
 	.main_loop:
+        call move_ball
 		call print_pallet
-		call print_ball
 		call draw_blocks_m
 		call score_info
+        call print_ball
 		print board, board_size
 		;setnonblocking
+
 	.read_more:
 		getchar
 
