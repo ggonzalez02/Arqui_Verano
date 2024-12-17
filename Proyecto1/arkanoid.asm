@@ -24,7 +24,7 @@ array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to byt
 ;This is regarding the sleep time
 timespec:
     tv_sec  dq 0
-    tv_nsec dq 70000000
+    tv_nsec dq 20000
 
 
 ;This is for cleaning up the screen
@@ -240,8 +240,10 @@ section .data
 	ball_y_pos: dq 26
     ball_x_direction: db 1  ; + derecha, - izquierda
     ball_y_direction: db 1  ; + abajo, - arriba
+    ball_counter dq 0
+    ball_move dq 800          ; Para que la bola se mueva cada 3 ciclos
 
-	; Bloques 
+	; Bloques
 	block1: db 'OOOO', 0
 	block2: db 'UUUU', 0
 
@@ -275,14 +277,14 @@ print_ball:
     add rax, [ball_x_pos]   ; Se suma la posicion x para tener la posicion de la bola
     add r8, rax             ; Posicion de memoria donde se va a dibujar la bola
 
-    mov r10, board          
+    mov r10, board
     add r10, board_size     ; Direccion final del tablero
     ; Compara con los bordes del tablero para que la bola se mantenga dentro de este
     cmp r8, board           ; Se compara la posicion de la bola con la posicion inicial del tablero
     jl .exit_ball           ; Si es menor no se dibuja la bola
     cmp r8, r10             ; Se compara la posicion de la bola con la posicion final del tablero
     jg .exit_ball           ; Si es mayor no se dibuja la bola
-    
+
     cmp byte [r8], 'X'      ; Comparar para saber si se llego a un limite del area de juego
     je .exit_ball           ; Si se llega al borde no se dibuja la bola
 
@@ -299,7 +301,7 @@ move_ball:
     mul r9
     add rax, [ball_x_pos]
     add r8, rax
-    
+
     mov byte [r8], ' '    ; Borrar posicion actual de la bola
 
     mov rax, [ball_x_pos] ; Posicion x actual
@@ -313,10 +315,16 @@ move_ball:
     add rax, r10          ; Se suman la posicion x y la multiplicacion anterior
     lea r8, [board + rax] ; Obtiene la direccion con el desplazamiento (posicion actual)
 
+    cmp byte [r8], char_equal ; Compara la posicion actual con '=' para identificar el choque con la paleta
+    jne .check_wall
+    neg byte [ball_y_direction]
+    jmp .check_wall
+
+.check_wall:
     cmp byte [r8], 'X'    ; Compara la posicion actual con el borde del area de juego
     jne .move_x           ; Si no esta en el borde, pasa a la funcion move_x
     neg byte [ball_x_direction]  ; Si esta en el borde direccion la direccion de x
-    jmp .check_y          
+    jmp .check_y
 
 .move_x:
     mov [ball_x_pos], r10  ; Actualiza la posicion de la bola
@@ -326,14 +334,14 @@ move_ball:
     movsx rbx, byte [ball_y_direction] ; Carga la direccion con signo (arriba o abajo)
     add rax, rbx          ; Calcula nueva posicion
     mov r10, rax          ; Guarda la nueva posicion
-    mov rax, column_cells + column_cells2 + 2  
+    mov rax, column_cells + column_cells2 + 2
     mul r10               ; Multiplica la posicion y por el ancho de la consola
     add rax, [ball_x_pos] ; A la posicion en y se le suma la posicion en x
     lea r8, [board + rax] ; Se obtiene la direccion en la consola
 
     cmp byte [r8], 'X'
     jne .move_y
-    neg byte [ball_y_direction]   
+    neg byte [ball_y_direction]
     ret
 
 .move_y:
@@ -395,8 +403,8 @@ draw_blocks_m:
 	push r12
 	push r13
 
-	mov r8, board 
-	add r8, ((column_cells+3)+(column_cells2 + 3))*6  
+	mov r8, board
+	add r8, ((column_cells+3)+(column_cells2 + 3))*6
 	sub r8, 17                        ; Iniciar 6 filas debajo del limite superior
 	mov r10, 6                        ; Filas
 	lea r12, [block1]      			  ; Guarda la direccion de memoria del bloque 1
@@ -429,7 +437,7 @@ draw_blocks_m:
 .draw_chars:
     mov al, byte [rsi]                ; Copia un caracter del bloque
     mov byte [r8], al				  ; Copia el caracter a la posicion del tablero
-    inc rsi							  
+    inc rsi
     inc r8
     dec rcx
     jnz .draw_chars					  ; Repite hasta que se dibujen todos los caracteres
@@ -459,7 +467,7 @@ score_info:
 	push r13
 
 	mov r8, board
-	add r8, (column_cells+5)*5       
+	add r8, (column_cells+5)*5
 	sub r8, 5						; Se ubica la posicion donde se quiere colocar el puntaje
 	mov rsi, score_text			    ; Texto 'PUNTAJE'
 	mov rcx, score_length			; Longitud del texto
@@ -478,7 +486,7 @@ score_info:
 	mov rdi, [current_level]		; Valor del nivel actual
     call num_to_str
 
-	add r8, (column_cells+5)*15		
+	add r8, (column_cells+5)*15
 	sub r8, 46						; Se ubica la posicion donde se quieren colocar las vidas
 
 	mov rsi, lives_text				; Texto 'VIDAS'
@@ -501,7 +509,7 @@ num_to_str:
 	mov rbx, 10			; Divisor para obtener los digitos
 	mov rax, rdi        ; Numero a convertir (niveles, vidas o puntos)
     xor rcx, rcx        ; Contador
-    
+
 .divide_loop:
     xor rdx, rdx        ; Limpiar rdx para la division
     div rbx             ; Dividir por 10
@@ -509,7 +517,7 @@ num_to_str:
     inc rcx             ; Incrementar contador
     test rax, rax       ; Verificar si quedan digitos
     jnz .divide_loop
-    
+
 .write_loop:
     pop rdx             ; Obtener digitos del stack
     add dl, '0'         ; Convertir a ASCII
@@ -517,7 +525,7 @@ num_to_str:
     inc r8              ; Siguiente espacio en memoria
     dec rcx             ; Decrementar contador
     jnz .write_loop
-    
+
     pop rdx
     pop rbx
     ret
@@ -526,7 +534,7 @@ num_to_str:
 write_score:
     push rcx
     push rsi
-    
+
 .write_loop:
     mov al, byte [rsi]
     mov [r8], al
@@ -534,12 +542,10 @@ write_score:
     inc r8
     dec rcx
     jnz .write_loop
-    
+
     pop rsi
     pop rcx
     ret
-
-
 
 _start:
 	call canonical_off
@@ -548,13 +554,20 @@ _start:
 
 
 	.main_loop:
+        ; Se usa un contador para la bola para no afectar la velocidad de respuesta de la paleta
+        inc qword [ball_counter]
+        mov rax, [ball_counter]
+        cmp rax, [ball_move]
+        jl .skip_ball_move        ; Si el contador es menor que el limite establecido no se
+        mov qword [ball_counter], 0
         call move_ball
+
+    .skip_ball_move:
 		call print_pallet
 		call draw_blocks_m
 		call score_info
         call print_ball
 		print board, board_size
-		;setnonblocking
 
 	.read_more:
 		getchar
@@ -609,3 +622,4 @@ exit:
 	mov    rax, 60
     mov    rdi, 0
     syscall
+
