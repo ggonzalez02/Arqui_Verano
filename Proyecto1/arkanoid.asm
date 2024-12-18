@@ -294,6 +294,62 @@ print_ball:
 	ret
 
 ; Funcion: Mover la bola incluyendo los rebotes en los bordes
+; Function to erase a block when hit
+erase_block:
+    ; rdi should contain the position where collision occurred
+    push r8
+    push r9
+    push rax
+    push rbx
+    push rcx
+
+    mov r8, rdi        ; Position of collision
+    mov r9, 4          ; Block width is 4 characters
+
+    ; First check if we hit 'O' or 'U'
+    mov al, byte [r8]
+    cmp al, 'O'
+    je .find_block_start
+    cmp al, 'U'
+    je .find_block_start
+    jmp .end
+
+.find_block_start:
+    ; Save the type of block we hit
+    mov bl, al         ; Save 'O' or 'U' in bl
+
+    ; Find start of block by checking up to 3 positions to the left
+    mov rcx, 3         ; Maximum positions to check left
+.check_left:
+    mov al, byte [r8 - 1]  ; Check character to the left
+    cmp al, bl            ; Compare with our block type ('O' or 'U')
+    jne .start_erasing    ; If different, we found the start
+    dec r8               ; Move left
+    dec rcx
+    jnz .check_left
+
+.start_erasing:
+    ; Now r8 points to the first character of the block or close to it
+    ; Ensure we erase exactly 4 characters
+    mov rcx, 4          ; Block width
+.erase_loop:
+    mov byte [r8], ' '  ; Replace with space
+    inc r8
+    dec rcx
+    jnz .erase_loop
+
+    ; Increase score
+    add qword [current_score], 1
+
+.end:
+    pop rcx
+    pop rbx
+    pop rax
+    pop r9
+    pop r8
+    ret
+
+; Modified move_ball function with collision detection
 move_ball:
     mov r8, board
     mov r9, [ball_y_pos]
@@ -315,29 +371,46 @@ move_ball:
     add rax, r10          ; Se suman la posicion x y la multiplicacion anterior
     lea r8, [board + rax] ; Obtiene la direccion con el desplazamiento (posicion actual)
 
-    cmp byte [r8], char_equal ; Compara la posicion actual con '=' para identificar el choque con la paleta
+    ; Check for block collisions first
+    mov al, byte [r8]
+    cmp al, 'O'
+    je .block_collision
+    cmp al, 'U'
+    je .block_collision
+
+    ; Continue with original collision checks
+    cmp byte [r8], char_equal
     jne .check_wall
     neg byte [ball_y_direction]
     jmp .check_wall
 
+.block_collision:
+    ; Call block erasing function
+    mov rdi, r8         ; Pass collision position to erase_block
+    call erase_block
+
+    ; Bounce the ball (change direction)
+    neg byte [ball_y_direction]
+    jmp .check_wall
+
 .check_wall:
-    cmp byte [r8], 'X'    ; Compara la posicion actual con el borde del area de juego
-    jne .move_x           ; Si no esta en el borde, pasa a la funcion move_x
-    neg byte [ball_x_direction]  ; Si esta en el borde direccion la direccion de x
+    cmp byte [r8], 'X'
+    jne .move_x
+    neg byte [ball_x_direction]
     jmp .check_y
 
 .move_x:
-    mov [ball_x_pos], r10  ; Actualiza la posicion de la bola
+    mov [ball_x_pos], r10
 
 .check_y:
-    mov rax, [ball_y_pos]  ; Guarda la posicion actual en y
-    movsx rbx, byte [ball_y_direction] ; Carga la direccion con signo (arriba o abajo)
-    add rax, rbx          ; Calcula nueva posicion
-    mov r10, rax          ; Guarda la nueva posicion
+    mov rax, [ball_y_pos]
+    movsx rbx, byte [ball_y_direction]
+    add rax, rbx
+    mov r10, rax
     mov rax, column_cells + column_cells2 + 2
-    mul r10               ; Multiplica la posicion y por el ancho de la consola
-    add rax, [ball_x_pos] ; A la posicion en y se le suma la posicion en x
-    lea r8, [board + rax] ; Se obtiene la direccion en la consola
+    mul r10
+    add rax, [ball_x_pos]
+    lea r8, [board + rax]
 
     cmp byte [r8], 'X'
     jne .move_y
@@ -345,7 +418,7 @@ move_ball:
     ret
 
 .move_y:
-    mov [ball_y_pos], r10  ; Actualiza posicion en y
+    mov [ball_y_pos], r10
     ret
 
 
@@ -622,4 +695,3 @@ exit:
 	mov    rax, 60
     mov    rdi, 0
     syscall
-
