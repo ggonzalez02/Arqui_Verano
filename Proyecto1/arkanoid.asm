@@ -85,11 +85,23 @@ msg8_length:	equ $-msg8
 
 
 %macro print 2
-	mov eax, sys_write
-	mov edi, 1 	; stdout
-	mov rsi, %1
-	mov edx, %2
-	syscall
+	push rax            ; Guardar registros que vamos a usar
+    push rdi
+    push rsi
+    push rdx
+    push rcx           ; Añadido rcx a los registros guardados
+    
+    mov rax, sys_write ; sys_write
+    mov rdi, 1         ; stdout
+    mov rsi, %1        ; primer parámetro - dirección del texto
+    mov rdx, %2        ; segundo parámetro - longitud
+    syscall
+    
+    pop rcx            ; Restaurar registros en orden inverso
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
 %endmacro
 
 %macro getchar 0
@@ -113,7 +125,11 @@ global _start
 
 section .bss
 
-input_char: resb 1
+    input_char: resb 1
+    num_buffer: resb 32    ; Buffer más grande para seguridad
+    score_buffer: resb 32
+    level_buffer: resb 32
+    lives_buffer: resb 32
 
 section .data
 
@@ -259,6 +275,22 @@ section .data
     initial_ball_y dq 26    ; Posición Y inicial de la bola
     initial_pallet_pos dq board + 34 + 27 * (column_cells +2)  ; Posición inicial de la paleta
 
+    score: dq 0          ; Puntaje inicial
+    level: dq 1          ; Nivel inicial
+    lives: dq 5          ; Vidas iniciales
+
+    cursor_up db 27, "[20A"
+    cursor_right db 27, "[75C"
+    new_line db 10, 13
+
+    ; Textos
+    score_text db "PUNTAJE: "
+    score_length equ $ - score_text
+    level_text db "NIVEL: "
+    level_length equ $ - level_text
+    lives_text db "VIDAS: "
+    lives_length equ $ - lives_text
+
 section .text
 
 clear_board:
@@ -352,26 +384,26 @@ reset_positions:
 move_ball:
     ; Comprobar colisión con bloques primero
     movzx rax, byte [ball_y_pos]
-    sub eax, BLOCK_START_ROW      ; Ajustar para región de bloques
+    sub eax, BLOCK_START_ROW      
     cmp rax, 0
-    jl .check_paddle              ; Si está fuera de región de bloques, verificar paleta
+    jl .check_paddle              
     cmp rax, BLOCK_ROWS
     jge .check_paddle
     
     ; Calcular índice del bloque
-    push rax                      ; Guardar fila actual
+    push rax                      
     movzx rcx, byte [ball_x_pos]
     sub ecx, 1
     mov eax, ecx
     xor edx, edx
-    mov ebx, BLOCK_WIDTH + 1      ; +1 por el espacio entre bloques
+    mov ebx, BLOCK_WIDTH + 1      
     div ebx
     
     cmp eax, BLOCKS_PER_ROW
     jge .check_paddle_pop
     
-    pop rbx                       ; Recuperar fila
-    push rax                      ; Guardar columna
+    pop rbx                       
+    push rax                      
     
     mov rax, rbx
     mov rcx, BLOCKS_PER_ROW
@@ -379,13 +411,18 @@ move_ball:
     pop rcx
     add rax, rcx
     
-    ; Verificar si hay un bloque
+    ; Verificar si el índice está dentro de los límites antes de acceder
+    cmp rax, BLOCK_ROWS * BLOCKS_PER_ROW
+    jge .check_paddle
+    
+    ; Verificar si hay un bloque y actualizarlo
     cmp byte [blocks_state + rax], 1
     jne .check_paddle
     
-    ; Destruir bloque y rebotar
-    mov byte [blocks_state + rax], 0
-    neg byte [ball_dir_y]
+    ; Destruir bloque y actualizar score
+    mov byte [blocks_state + rax], 0  ; Destruir el bloque
+    add qword [score], 1            ; Incrementar el score
+    neg byte [ball_dir_y]             ; Hacer que la pelota rebote
     jmp .move_x
 
 .check_paddle_pop:
@@ -400,7 +437,7 @@ move_ball:
     movzx rcx, byte [ball_x_pos]
     mov rdx, [pallet_position]
     sub rdx, board
-    sub rdx, 27 * (column_cells + 2)  ; Ajustar posición relativa
+    sub rdx, 27 * (column_cells + 2)
     
     cmp rcx, rdx
     jl .move_x
@@ -416,12 +453,11 @@ move_ball:
     movsx rbx, byte [ball_dir_x] ; Obtener dirección X
     add rax, rbx                 ; Calcular nueva posición X
     
-    ; Verificar límites X
     cmp rax, 1                   ; Verificar límite izquierdo
     jle .bounce_x
-    cmp rax, column_cells-2      ; Verificar límite derecho
+    cmp rax, column_cells-1      ; Verificar límite derecho
     jge .bounce_x
-    mov [ball_x_pos], al         ; Actualizar posición X si no hay colisión
+    mov [ball_x_pos], al         ; Actualizar posición X
     jmp .move_y
 
 .bounce_x:
@@ -436,12 +472,19 @@ move_ball:
     movsx rbx, byte [ball_dir_y] ; Obtener dirección Y
     add rax, rbx                 ; Calcular nueva posición Y
     
-    ; Verificar límites Y
     cmp rax, 1                   ; Verificar límite superior
     jle .bounce_y
-    cmp rax, row_cells-2        ; Verificar límite inferior
-    je .reset_game
-    mov [ball_y_pos], al         ; Actualizar posición Y si no hay colisión
+    cmp rax, row_cells-1         ; Verificar límite inferior
+    jge .ball_lost
+    mov [ball_y_pos], al         ; Actualizar posición Y
+    ret
+
+.ball_lost:
+    dec qword [lives]            ; Decrementar vidas
+    mov rax, [lives]
+    test rax, rax               ; Verificar si quedan vidas
+    jz exit                     ; Si no quedan vidas, terminar
+    call reset_positions        ; Resetear posiciones
     ret
 
 .bounce_y:
@@ -452,9 +495,6 @@ move_ball:
     mov [ball_y_pos], al
     ret
 
-.reset_game:
-    call reset_positions         ; Llamar a función de reinicio
-    ret
 
 ;	Function: print_pallet
 ; This function moves the pallet in the game
@@ -632,8 +672,142 @@ check_block_collision:
     pop rbx
     ret
 
+write_score:
+    push rcx
+.write_loop:
+    mov al, [rsi]
+    mov [r8], al
+    inc rsi
+    inc r8
+    dec rcx
+    jnz .write_loop
+    pop rcx
+    ret
+
+number_to_string:
+    ; rax = número a convertir
+    ; rdi = buffer destino
+    push rbx
+    push rdx
+    push rsi
+    
+    mov rsi, rdi        ; Guardar puntero al buffer
+    add rdi, 30         ; Ir casi al final del buffer
+    mov byte [rdi], 0   ; Null terminator
+    mov rbx, 10
+    
+    ; Si el número es 0, manejarlo especialmente
+    test rax, rax
+    jnz .convert
+    dec rdi
+    mov byte [rdi], '0'
+    jmp .done
+
+.convert:
+    ; Convertir número
+    test rax, rax
+    jz .done
+    xor rdx, rdx
+    div rbx
+    add dl, '0'
+    dec rdi
+    mov [rdi], dl
+    jmp .convert
+
+.done:
+    ; Mover al inicio del buffer
+    mov rcx, rsi
+.copy:
+    mov al, [rdi]
+    mov [rcx], al
+    inc rdi
+    inc rcx
+    cmp byte [rdi-1], 0
+    jne .copy
+    
+    pop rsi
+    pop rdx
+    pop rbx
+    ret
+
+; Función actualizada para imprimir la información del juego
+print_game_info:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+
+    ; PUNTAJE
+    print cursor_up, 3
+    print cursor_right, 5
+    print score_text, score_length
+    
+    mov rax, [score]
+    mov rdi, num_buffer
+    call number_to_string
+    
+    ; Calcular longitud
+    mov rcx, 0
+    mov rdi, num_buffer
+.count1:
+    cmp byte [rdi + rcx], 0
+    je .print1
+    inc rcx
+    jmp .count1
+.print1:
+    print num_buffer, rcx
+    print new_line, 2
+    
+    ; NIVEL
+    print cursor_right, 5
+    print level_text, level_length
+    
+    mov rax, [level]
+    mov rdi, num_buffer
+    call number_to_string
+    
+    mov rcx, 0
+    mov rdi, num_buffer
+.count2:
+    cmp byte [rdi + rcx], 0
+    je .print2
+    inc rcx
+    jmp .count2
+.print2:
+    print num_buffer, rcx
+    print new_line, 2
+    
+    ; VIDAS
+    print cursor_right, 5
+    print lives_text, lives_length
+    
+    mov rax, [lives]
+    mov rdi, num_buffer
+    call number_to_string
+    
+    mov rcx, 0
+    mov rdi, num_buffer
+.count3:
+    cmp byte [rdi + rcx], 0
+    je .print3
+    inc rcx
+    jmp .count3
+.print3:
+    print num_buffer, rcx
+    print new_line, 2
+    
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
 
 _start:
+    ; Inicializar variables
+    mov qword [score], 0   ; Inicializar score en 0
+    mov qword [level], 1   ; Inicializar level en 1
+    mov qword [lives], 5   ; Inicializar lives en 5
+
 	call canonical_off
 	print clear, clear_length
 	call start_screen
@@ -653,12 +827,12 @@ _start:
     .skip_ball_move:
         ; Limpiar la posición anterior de la pelota
         print clear, clear_length
-        call clear_board
-        
+        call clear_board      
         call draw_blocks_m
 		call print_pallet
 		call print_ball
 		print board, board_size
+        call print_game_info
 
 		getchar
 
