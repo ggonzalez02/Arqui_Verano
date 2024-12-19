@@ -255,8 +255,6 @@ section .data
     ball_counter dq 0        ; Contador actual
     ball_move dq 40          ; Límite para mover la pelota (ajustar este valor para cambiar la velocidad)
 
-
-	block_chars: db 'OOOUUUOOO', 0  ; Secuencia de bloques
     block_shape db "####"    ; Forma del bloque
     block_empty db "    "    ; Espacio vacío del mismo ancho que un bloque
 
@@ -290,6 +288,31 @@ section .data
     level_length equ $ - level_text
     lives_text db "VIDAS: "
     lives_length equ $ - lives_text
+
+    ; Estados de power-ups
+    has_shooting dq 0          ; Estado del power-up de disparo
+    bullet_active_left dq 0    ; Estado de la bala izquierda
+    bullet_active_right dq 0   ; Estado de la bala derecha
+    bullet_x_left dq 0        ; Posición X de la bala izquierda
+    bullet_y_left dq 0        ; Posición Y de la bala izquierda
+    bullet_x_right dq 0       ; Posición X de la bala derecha
+    bullet_y_right dq 0       ; Posición Y de la bala derecha
+    bullet_char db '^'        ; Carácter para la bala
+    ; Variables temporales para check_bullet_collision
+    bullet_x dq 0            ; Variable temporal para colisiones
+    bullet_y dq 0            ; Variable temporal para colisiones
+    bullet_active dq 0       ; Variable temporal para colisiones
+    powerup_spawn_rate dq 20   ; Probabilidad de spawn de power-up (ajustar según necesidad)
+    powerup_duration dq 2500   ; Duración del power-up (5 segundos: 2500 ciclos * 2ms = 5000ms)
+    powerup_timer dq 0         ; Temporizador para el power-up actual
+    powerup_x dq 0            ; Posición X del power-up cayendo
+    powerup_y dq 0            ; Posición Y del power-up cayendo
+    powerup_active dq 0        ; Si hay un power-up cayendo
+    powerup_char db 'S'       ; Carácter para el power-up de disparo
+    auto_shoot_timer dq 0      ; Temporizador para el disparo automático
+    auto_shoot_rate dq 20      ; Frecuencia de disparo automático
+    blocks_destroyed dq 0      ; Contador de bloques destruidos
+    blocks_for_powerup dq 3    ; Número de bloques que hay que destruir para que aparezca un power-up
 
 section .text
 
@@ -416,13 +439,15 @@ move_ball:
     jge .check_paddle
     
     ; Verificar si hay un bloque y actualizarlo
+
     cmp byte [blocks_state + rax], 1
     jne .check_paddle
     
-    ; Destruir bloque y actualizar score
-    mov byte [blocks_state + rax], 0  ; Destruir el bloque
-    add qword [score], 1            ; Incrementar el score
-    neg byte [ball_dir_y]             ; Hacer que la pelota rebote
+    push rax                        ; Guardar el índice del bloque
+    call handle_block_destruction   ; Manejar la destrucción del bloque
+    pop rax
+    
+    neg byte [ball_dir_y]          ; Hacer que la pelota rebote
     jmp .move_x
 
 .check_paddle_pop:
@@ -802,11 +827,339 @@ print_game_info:
     pop rax
     ret
 
+; Función compartida para manejar la destrucción de bloques y spawn de power-ups
+handle_block_destruction:
+    ; rax debe contener el índice del bloque
+    mov byte [blocks_state + rax], 0   ; Destruir el bloque
+    add qword [score], 1               ; Incrementar score
+    inc qword [blocks_destroyed]       ; Incrementar contador de bloques destruidos
+    
+    mov r10, rax                       ; Guardar el índice del bloque
+    
+    ; Solo generar power-up si no hay uno activo
+    cmp qword [powerup_active], 1
+    je .no_spawn
+    
+    ; Verificar si debemos generar un power-up (cada 5 bloques)
+    mov rax, [blocks_destroyed]
+    mov rcx, 5                         ; Queremos un power-up cada 5 bloques
+    xor rdx, rdx
+    div rcx                           ; Divide blocks_destroyed por 5
+    test rdx, rdx                     ; Verifica si hay residuo
+    jnz .no_spawn                     ; Si hay residuo, no generar power-up
+    cmp rax, 0                        ; Si el resultado es 0, no generar power-up
+    je .no_spawn
+    
+    ; Calcular la posición del bloque destruido
+    mov rax, r10                      ; Recuperar índice del bloque
+    xor rdx, rdx
+    mov rcx, BLOCKS_PER_ROW
+    div rcx                           ; rax = fila, rdx = columna
+    
+    ; Calcular posición Y
+    add rax, BLOCK_START_ROW
+    mov [powerup_y], rax
+    
+    ; Calcular posición X
+    mov rax, rdx
+    mov rcx, BLOCK_WIDTH + BLOCK_SPACING
+    mul rcx
+    add rax, 2                        ; Ajustar por el borde
+    mov [powerup_x], rax
+    
+    ; Activar el power-up
+    mov qword [powerup_active], 1
+    
+.no_spawn:
+    ret
+
+; Función para activar el power-up de disparo
+activate_shooting:
+    mov qword [has_shooting], 1
+    mov rax, [powerup_duration]    ; Primero movemos el valor a un registro
+    mov qword [powerup_timer], rax ; Luego lo movemos del registro a la memoria
+    ret
+
+; Función para actualizar el temporizador del power-up y el disparo automático
+update_powerup_timer:
+    ; Actualizar el temporizador del power-up
+    cmp qword [powerup_timer], 0
+    je .check_auto_shoot
+    dec qword [powerup_timer]
+    jnz .check_auto_shoot
+    mov qword [has_shooting], 0    ; Desactivar power-up cuando el tiempo se acaba
+    jmp .done
+
+.check_auto_shoot:
+    ; Si no tenemos el power-up activo, no disparar
+    cmp qword [has_shooting], 0
+    je .done
+
+    ; Incrementar el temporizador de disparo automático
+    inc qword [auto_shoot_timer]
+    mov rax, [auto_shoot_timer]
+    cmp rax, [auto_shoot_rate]
+    jl .done
+
+    ; Resetear el temporizador y disparar
+    mov qword [auto_shoot_timer], 0
+    call shoot_bullet
+
+.done:
+    ret
+
+; Función para disparar las balas
+shoot_bullet:
+    ; Verificar y disparar bala izquierda
+    cmp qword [bullet_active_left], 1
+    je .check_right
+    
+    mov qword [bullet_active_left], 1
+    ; Posicionar la bala en el extremo izquierdo de la paleta
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [bullet_y_left], rax           ; Y inicial
+    
+    mov rax, [pallet_position]
+    sub rax, board
+    mov [bullet_x_left], rax           ; X inicial (borde izquierdo de la paleta)
+    xor rdx, rdx
+    div rbx                            ; Dividir por ancho de línea para ajustar
+    mov [bullet_x_left], rdx           ; Solo mantener el offset dentro de la línea
+
+.check_right:
+    ; Verificar y disparar bala derecha
+    cmp qword [bullet_active_right], 1
+    je .done
+    
+    mov qword [bullet_active_right], 1
+    ; Posicionar la bala en el extremo derecho de la paleta
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [bullet_y_right], rax          ; Y inicial
+    
+    ; Calcular posición X del borde derecho
+    mov rax, [pallet_position]
+    sub rax, board
+    add rax, [pallet_size]            ; Añadir el tamaño de la paleta
+    dec rax                           ; Ajustar para el último carácter
+    mov [bullet_x_right], rax         ; X inicial (borde derecho de la paleta)
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx                          ; Dividir por ancho de línea para ajustar
+    mov [bullet_x_right], rdx        ; Solo mantener el offset dentro de la línea
+
+.done:
+    ret
+
+; Función para actualizar la posición de las balas
+update_bullet:
+    ; Actualizar bala izquierda
+    cmp qword [bullet_active_left], 0
+    je .update_right
+    
+    ; Mover la bala izquierda hacia arriba
+    dec qword [bullet_y_left]
+    
+    ; Verificar colisión con el borde superior
+    cmp qword [bullet_y_left], 1
+    jle .deactivate_left
+    
+    ; Verificar colisión con bloques
+    mov rax, [bullet_x_left]
+    mov [bullet_x], rax
+    mov rax, [bullet_y_left]
+    mov [bullet_y], rax
+    call check_bullet_collision
+    jmp .update_right
+
+.deactivate_left:
+    mov qword [bullet_active_left], 0
+
+.update_right:
+    ; Actualizar bala derecha
+    cmp qword [bullet_active_right], 0
+    je .done
+    
+    ; Mover la bala derecha hacia arriba
+    dec qword [bullet_y_right]
+    
+    ; Verificar colisión con el borde superior
+    cmp qword [bullet_y_right], 1
+    jle .deactivate_right
+    
+    ; Verificar colisión con bloques
+    mov rax, [bullet_x_right]
+    mov [bullet_x], rax
+    mov rax, [bullet_y_right]
+    mov [bullet_y], rax
+    call check_bullet_collision
+    jmp .done
+
+.deactivate_right:
+    mov qword [bullet_active_right], 0
+
+.done:
+    ret
+
+; Función para verificar colisión de la bala con bloques
+check_bullet_collision:
+    push rbx
+    push rcx
+    push rdx
+    
+    ; Obtener posición Y de la bala
+    mov rax, [bullet_y]
+    sub rax, BLOCK_START_ROW
+    cmp rax, 0
+    jl .no_collision
+    cmp rax, BLOCK_ROWS
+    jge .no_collision
+    
+    ; Calcular índice del bloque
+    mov rbx, BLOCKS_PER_ROW
+    mul rbx
+    
+    ; Obtener posición X y calcular columna
+    mov rcx, [bullet_x]
+    sub rcx, 1
+    mov rax, rcx
+    mov rbx, BLOCK_WIDTH + BLOCK_SPACING
+    xor rdx, rdx
+    div rbx
+    
+    cmp rax, BLOCKS_PER_ROW
+    jge .no_collision
+    
+    ; Calcular índice final del bloque
+    mov rbx, [bullet_y]
+    sub rbx, BLOCK_START_ROW
+    imul rbx, BLOCKS_PER_ROW
+    add rax, rbx
+    
+    ; Verificar si hay un bloque
+    cmp byte [blocks_state + rax], 1
+    jne .no_collision
+    
+    push rax                        ; Guardar el índice del bloque
+    call handle_block_destruction   ; Manejar la destrucción del bloque
+    pop rax
+    
+    mov qword [bullet_active], 0   ; Desactivar la bala
+    
+.no_collision:
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; Función para manejar la caída del power-up
+update_powerup:
+    cmp qword [powerup_active], 0
+    je .done
+    
+    ; Mover el power-up hacia abajo cada ciertos ciclos (más lento)
+    mov rax, [ball_counter]
+    mov rcx, 40                ; Aumentado para que caiga más lento
+    xor rdx, rdx
+    div rcx
+    test rdx, rdx
+    jnz .done
+    
+    inc qword [powerup_y]
+    
+    ; Verificar si llegó al fondo
+    cmp qword [powerup_y], row_cells-2
+    jge .deactivate
+    
+    ; Verificar colisión con la paleta
+    mov rax, [powerup_y]
+    cmp rax, 27                  ; Altura de la paleta
+    jne .done
+    
+    mov rcx, [powerup_x]
+    mov rdx, [pallet_position]
+    sub rdx, board
+    sub rdx, 27 * (column_cells + 2)
+    
+    cmp rcx, rdx
+    jl .done
+    
+    add rdx, [pallet_size]
+    cmp rcx, rdx
+    jg .done
+    
+    ; Colisión con la paleta - activar power-up
+    call activate_shooting
+    mov qword [powerup_active], 0
+    jmp .done
+    
+.deactivate:
+    mov qword [powerup_active], 0
+.done:
+    ret
+
+; Función para dibujar las balas
+print_bullet:
+    ; Dibujar bala izquierda
+    cmp qword [bullet_active_left], 0
+    je .print_right
+    
+    mov rax, [bullet_y_left]
+    mov rbx, column_cells + 2
+    mul rbx
+    add rax, [bullet_x_left]
+    add rax, board
+    mov bl, [bullet_char]
+    mov [rax], bl
+
+.print_right:
+    ; Dibujar bala derecha
+    cmp qword [bullet_active_right], 0
+    je .done
+    
+    mov rax, [bullet_y_right]
+    mov rbx, column_cells + 2
+    mul rbx
+    add rax, [bullet_x_right]
+    add rax, board
+    mov bl, [bullet_char]
+    mov [rax], bl
+    
+.done:
+    ret
+
+; Función para dibujar el power-up
+print_powerup:
+    cmp qword [powerup_active], 0
+    je .done
+    
+    ; Calcular posición en el tablero
+    mov rax, [powerup_y]
+    mov rbx, column_cells + 2
+    mul rbx
+    add rax, [powerup_x]
+    add rax, board
+    
+    ; Dibujar el power-up
+    mov bl, [powerup_char]
+    mov [rax], bl
+    
+.done:
+    ret
+
 _start:
     ; Inicializar variables
     mov qword [score], 0   ; Inicializar score en 0
     mov qword [level], 1   ; Inicializar level en 1
     mov qword [lives], 5   ; Inicializar lives en 5
+    mov qword [blocks_destroyed], 0
 
 	call canonical_off
 	print clear, clear_length
@@ -827,11 +1180,15 @@ _start:
     .skip_ball_move:
         ; Limpiar la posición anterior de la pelota
         print clear, clear_length
-        call clear_board      
+        call clear_board
         call draw_blocks_m
-		call print_pallet
-		call print_ball
-		print board, board_size
+        call print_pallet
+        call print_ball
+        call print_bullet
+        call print_powerup       ; Asegúrate de que esta línea esté presente
+        call update_powerup      ; Y esta también
+        call update_powerup_timer
+        print board, board_size
         call print_game_info
 
 		getchar
@@ -859,6 +1216,9 @@ _start:
 	    call move_pallet
 
 	.done:
+        call update_bullet       ; Actualizar posición de la bala
+        call update_powerup      ; Actualizar power-up cayendo
+        call update_powerup_timer ; Actualizar temporizador del power-up
 		sleeptime
     	jmp .main_loop
 		
