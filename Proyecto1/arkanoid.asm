@@ -17,14 +17,15 @@ O_NONBLOCK: equ 0x0004
 
 ;screen clean definition
 row_cells:	equ 32	; set to any (reasonable) value you wish
-column_cells: 	equ 54 ; set to any (reasonable) value you wish
-column_cells2: 	equ 20 ; Para el marcador de vidas, puntaje y nivel
+column_cells: 	equ 67 ; set to any (reasonable) value you wish
 array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to bytes in the array and a new line char ends each row
+BLOCK_WIDTH equ 4        ; Ancho de cada bloque
+BLOCK_SPACING equ 1      ; Espacio entre bloques
 
 ;This is regarding the sleep time
 timespec:
     tv_sec  dq 0
-    tv_nsec dq 20000
+    tv_nsec dq 2000000
 
 
 ;This is for cleaning up the screen
@@ -73,26 +74,21 @@ msg8_length:	equ $-msg8
 
 %macro full_line 0
     times column_cells db "X"
-	db " "                    ; Espacio entre el cuadro de juego y de puntaje
-	times column_cells2 db "X"
     db 0x0a, 0xD
 %endmacro
 
 %macro hollow_line 0
     db "X"
     times column_cells-2 db " "
-    db "X"
-	db " "
-	db "X"
-	times column_cells2-2 db " "
-	db "X", 0x0a, 0xD
+    db "X", 0x0a, 0xD
 %endmacro
 
+
 %macro print 2
-	mov rax, sys_write
-	mov rdi, 1 	; stdout
+	mov eax, sys_write
+	mov edi, 1 	; stdout
 	mov rsi, %1
-	mov rdx, %2
+	mov edx, %2
 	syscall
 %endmacro
 
@@ -105,9 +101,9 @@ msg8_length:	equ $-msg8
 %endmacro
 
 %macro sleeptime 0
-	mov rax, sys_nanosleep
+	mov eax, sys_nanosleep
 	mov rdi, timespec
-	xor rsi, rsi		; ignore remaining time in case of call interruption
+	xor esi, esi		; ignore remaining time in case of call interruption
 	syscall			; sleep for tv_sec seconds + tv_nsec nanoseconds
 %endmacro
 
@@ -145,9 +141,9 @@ canonical_off:
 
         ; clear canonical bit in local mode flags
         push rax
-        mov rax, ICANON
-        not rax
-        and [termios+12], rax
+        mov eax, ICANON
+        not eax
+        and [termios+12], eax
 		mov byte[termios+CC_C+VTIME], 0
 		mov byte[termios+CC_C+VMIN], 0
         pop rax
@@ -160,9 +156,9 @@ echo_off:
 
         ; clear echo bit in local mode flags
         push rax
-        mov rax, ECHO
-        not rax
-        and [termios+12], rax
+        mov eax, ECHO
+        not eax
+        and [termios+12], eax
         pop rax
 
         call write_stdin_termios
@@ -193,10 +189,10 @@ read_stdin_termios:
         push rcx
         push rdx
 
-        mov rax, 36h
-        mov rbx, stdin
-        mov rcx, 5401h
-        mov rdx, termios
+        mov eax, 36h
+        mov ebx, stdin
+        mov ecx, 5401h
+        mov edx, termios
         int 80h
 
         pop rdx
@@ -211,10 +207,10 @@ write_stdin_termios:
         push rcx
         push rdx
 
-        mov rax, 36h
-        mov rbx, stdin
-        mov rcx, 5402h
-        mov rdx, termios
+        mov eax, 36h
+        mov ebx, stdin
+        mov ecx, 5402h
+        mov edx, termios
         int 80h
 
         pop rdx
@@ -233,194 +229,232 @@ right_direction: equ 1
 
 
 section .data
-	pallet_position dq board -23 + 28 * (column_cells+column_cells2 +2)
+	pallet_position dq board + 34 + 27 * (column_cells +2)
 	pallet_size dq 3
 
-    ball_x_pos: dq 52
+	ball_x_pos: dq 34
 	ball_y_pos: dq 26
-    ball_x_direction: db 1  ; + derecha, - izquierda
-    ball_y_direction: db 1  ; + abajo, - arriba
-    ball_counter dq 0
-    ball_move dq 800          ; Para que la bola se mueva cada 3 ciclos
+    ball_dir_x dq 1
+    ball_dir_y dq 1
+    ball_counter dq 0        ; Contador actual
+    ball_move dq 40          ; Límite para mover la pelota (ajustar este valor para cambiar la velocidad)
 
-	; Bloques
-	block1: db 'OOOO', 0
-	block2: db 'UUUU', 0
 
-	; Textos para el marcador
-    score_text db "PUNTAJE: "
-    score_length equ $ - score_text
-    level_text db "NIVEL: "
-    level_length equ $ - level_text
-    lives_text db "VIDAS: "
-    lives_length equ $ - lives_text
+	block_chars: db 'OOOUUUOOO', 0  ; Secuencia de bloques
+    block_shape db "####"    ; Forma del bloque
+    block_empty db "    "    ; Espacio vacío del mismo ancho que un bloque
 
-    current_score dq 0
-    current_level dq 1
-    current_lives dq 5
+    ; Estado de los bloques (1=presente, 0=destruido)
+    blocks_state: times (13 * 6) db 1  ; 13 columnas x 6 filas
+    board_buffer: times (row_cells * (column_cells + 2)) db ' '  ; Buffer para el tablero
 
+   
+    ; Añadir constantes para los bloques
+    BLOCK_START_ROW equ 5      ; Fila donde empiezan los bloques
+    BLOCK_ROWS equ 6           ; Número de filas de bloques
+    BLOCKS_PER_ROW equ 13      ; Bloques por fila
+
+    ; Posiciones iniciales para reiniciar
+    initial_ball_x dq 34    ; Posición X inicial de la bola
+    initial_ball_y dq 26    ; Posición Y inicial de la bola
+    initial_pallet_pos dq board + 34 + 27 * (column_cells +2)  ; Posición inicial de la paleta
 
 section .text
 
+clear_board:
+    push rbx
+    push rcx
+    push rdx
+    
+    ; Limpiar solo el área interna del tablero
+    mov r8, 1                      ; Empezar desde la segunda fila
+.clear_row:
+    cmp r8, row_cells-1
+    jge .done
+    
+    ; Calcular posición inicial de la fila
+    mov rax, column_cells + 2
+    mul r8
+    lea rdi, [board + rax + 1]     ; +1 para saltar el borde izquierdo
+    
+    ; Limpiar la fila actual
+    mov rcx, column_cells - 2      ; -2 para respetar los bordes
+    mov al, ' '
+    rep stosb
+    
+    inc r8
+    jmp .clear_row
+
+.done:
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+    
 ;	Function: print_ball
 ; This function displays the position of the ball
 ; Arguments: none
 ;
 ; Return:
 ;	Void
-
 print_ball:
-    mov r8, board           ; Carga la direccion del tablero
-	mov r9, [ball_y_pos]    ; Carga la posicion y de la bola
-    mov rax, column_cells + column_cells2 + 2 ; Ancho total de la consola
-	mul r9                  ; Multiplica la posicion y por el ancho para obtener el offset de la fila
-    add rax, [ball_x_pos]   ; Se suma la posicion x para tener la posicion de la bola
-    add r8, rax             ; Posicion de memoria donde se va a dibujar la bola
-
-    mov r10, board
-    add r10, board_size     ; Direccion final del tablero
-    ; Compara con los bordes del tablero para que la bola se mantenga dentro de este
-    cmp r8, board           ; Se compara la posicion de la bola con la posicion inicial del tablero
-    jl .exit_ball           ; Si es menor no se dibuja la bola
-    cmp r8, r10             ; Se compara la posicion de la bola con la posicion final del tablero
-    jg .exit_ball           ; Si es mayor no se dibuja la bola
-
-    cmp byte [r8], 'X'      ; Comparar para saber si se llego a un limite del area de juego
-    je .exit_ball           ; Si se llega al borde no se dibuja la bola
-
-    mov byte [r8], '0'      ; Si no esta en el borde dibuja la bola
-
-.exit_ball:
-	ret
-
-; Funcion: Mover la bola incluyendo los rebotes en los bordes
-; Function to erase a block when hit
-erase_block:
-    ; rdi should contain the position where collision occurred
-    push r8
-    push r9
-    push rax
     push rbx
     push rcx
-
-    mov r8, rdi        ; Position of collision
-    mov r9, 4          ; Block width is 4 characters
-
-    ; First check if we hit 'O' or 'U'
-    mov al, byte [r8]
-    cmp al, 'O'
-    je .find_block_start
-    cmp al, 'U'
-    je .find_block_start
-    jmp .end
-
-.find_block_start:
-    ; Save the type of block we hit
-    mov bl, al         ; Save 'O' or 'U' in bl
-
-    ; Find start of block by checking up to 3 positions to the left
-    mov rcx, 3         ; Maximum positions to check left
-.check_left:
-    mov al, byte [r8 - 1]  ; Check character to the left
-    cmp al, bl            ; Compare with our block type ('O' or 'U')
-    jne .start_erasing    ; If different, we found the start
-    dec r8               ; Move left
-    dec rcx
-    jnz .check_left
-
-.start_erasing:
-    ; Now r8 points to the first character of the block or close to it
-    ; Ensure we erase exactly 4 characters
-    mov rcx, 4          ; Block width
-.erase_loop:
-    mov byte [r8], ' '  ; Replace with space
-    inc r8
-    dec rcx
-    jnz .erase_loop
-
-    ; Increase score
-    add qword [current_score], 1
-
-.end:
+    
+    ; Calcular la posición exacta en el tablero
+    mov r8, [ball_y_pos]
+    mov r9, [ball_x_pos]
+    
+    ; Calcular el offset en el tablero
+    mov rax, column_cells + 2
+    mul r8
+    add rax, r9
+    
+    ; Colocar la pelota en la posición correcta
+    add rax, board
+    mov byte [rax], char_O
+    
     pop rcx
     pop rbx
-    pop rax
-    pop r9
-    pop r8
     ret
 
-; Modified move_ball function with collision detection
+reset_positions:
+    push rbx
+    push rcx
+    
+    ; Reiniciar posición de la bola
+    mov rax, [initial_ball_x]
+    mov [ball_x_pos], rax
+    mov rax, [initial_ball_y]
+    mov [ball_y_pos], rax
+    
+    ; Reiniciar dirección de la bola (hacia arriba)
+    mov rax, 1
+    neg rax
+    mov [ball_dir_y], rax   ; Dirección Y negativa (hacia arriba)
+    mov rax, 1
+    mov [ball_dir_x], rax   ; Dirección X positiva
+    
+    ; Reiniciar posición de la paleta
+    mov rax, [initial_pallet_pos]
+    mov [pallet_position], rax
+    
+    ; Reiniciar contador de la bola
+    mov qword [ball_counter], 0
+    
+    pop rcx
+    pop rbx
+    ret
+
+; Modificar la función move_ball para incluir movimiento y colisiones
+; Función para mover la pelota y manejar colisiones
+; Función para mover la pelota y manejar todas las colisiones
 move_ball:
-    mov r8, board
-    mov r9, [ball_y_pos]
-    mov rax, column_cells + column_cells2 + 2
-    mul r9
-    add rax, [ball_x_pos]
-    add r8, rax
+    ; Comprobar colisión con bloques primero
+    movzx rax, byte [ball_y_pos]
+    sub eax, BLOCK_START_ROW      ; Ajustar para región de bloques
+    cmp rax, 0
+    jl .check_paddle              ; Si está fuera de región de bloques, verificar paleta
+    cmp rax, BLOCK_ROWS
+    jge .check_paddle
+    
+    ; Calcular índice del bloque
+    push rax                      ; Guardar fila actual
+    movzx rcx, byte [ball_x_pos]
+    sub ecx, 1
+    mov eax, ecx
+    xor edx, edx
+    mov ebx, BLOCK_WIDTH + 1      ; +1 por el espacio entre bloques
+    div ebx
+    
+    cmp eax, BLOCKS_PER_ROW
+    jge .check_paddle_pop
+    
+    pop rbx                       ; Recuperar fila
+    push rax                      ; Guardar columna
+    
+    mov rax, rbx
+    mov rcx, BLOCKS_PER_ROW
+    mul rcx
+    pop rcx
+    add rax, rcx
+    
+    ; Verificar si hay un bloque
+    cmp byte [blocks_state + rax], 1
+    jne .check_paddle
+    
+    ; Destruir bloque y rebotar
+    mov byte [blocks_state + rax], 0
+    neg byte [ball_dir_y]
+    jmp .move_x
 
-    mov byte [r8], ' '    ; Borrar posicion actual de la bola
+.check_paddle_pop:
+    pop rax
 
-    mov rax, [ball_x_pos] ; Posicion x actual
-    movsx rbx, byte [ball_x_direction] ; Carga la direccion con signo (der o izq)
-    add rax, rbx          ; Calcula nueva posicion (sumando la direccion y la posicion)
-    mov rcx, [ball_y_pos] ; Posicion y actual
-
-    mov r10, rax          ; Guarda nueva posicion en x
-    mov rax, column_cells + column_cells2 + 2
-    mul rcx               ; Multiplica y actual por el ancho de la consola
-    add rax, r10          ; Se suman la posicion x y la multiplicacion anterior
-    lea r8, [board + rax] ; Obtiene la direccion con el desplazamiento (posicion actual)
-
-    ; Check for block collisions first
-    mov al, byte [r8]
-    cmp al, 'O'
-    je .block_collision
-    cmp al, 'U'
-    je .block_collision
-
-    ; Continue with original collision checks
-    cmp byte [r8], char_equal
-    jne .check_wall
-    neg byte [ball_y_direction]
-    jmp .check_wall
-
-.block_collision:
-    ; Call block erasing function
-    mov rdi, r8         ; Pass collision position to erase_block
-    call erase_block
-
-    ; Bounce the ball (change direction)
-    neg byte [ball_y_direction]
-    jmp .check_wall
-
-.check_wall:
-    cmp byte [r8], 'X'
+.check_paddle:
+    ; Verificar colisión con la paleta
+    movzx rax, byte [ball_y_pos]
+    cmp rax, 27                  ; Altura de la paleta
     jne .move_x
-    neg byte [ball_x_direction]
-    jmp .check_y
+    
+    movzx rcx, byte [ball_x_pos]
+    mov rdx, [pallet_position]
+    sub rdx, board
+    sub rdx, 27 * (column_cells + 2)  ; Ajustar posición relativa
+    
+    cmp rcx, rdx
+    jl .move_x
+    
+    add rdx, [pallet_size]
+    cmp rcx, rdx
+    jg .move_x
+    
+    neg byte [ball_dir_y]        ; Rebotar en la paleta
 
 .move_x:
-    mov [ball_x_pos], r10
+    movzx rax, byte [ball_x_pos] ; Obtener posición X actual
+    movsx rbx, byte [ball_dir_x] ; Obtener dirección X
+    add rax, rbx                 ; Calcular nueva posición X
+    
+    ; Verificar límites X
+    cmp rax, 1                   ; Verificar límite izquierdo
+    jle .bounce_x
+    cmp rax, column_cells-2      ; Verificar límite derecho
+    jge .bounce_x
+    mov [ball_x_pos], al         ; Actualizar posición X si no hay colisión
+    jmp .move_y
 
-.check_y:
-    mov rax, [ball_y_pos]
-    movsx rbx, byte [ball_y_direction]
+.bounce_x:
+    neg byte [ball_dir_x]        ; Invertir dirección X
+    movzx rax, byte [ball_x_pos]
+    movsx rbx, byte [ball_dir_x]
     add rax, rbx
-    mov r10, rax
-    mov rax, column_cells + column_cells2 + 2
-    mul r10
-    add rax, [ball_x_pos]
-    lea r8, [board + rax]
-
-    cmp byte [r8], 'X'
-    jne .move_y
-    neg byte [ball_y_direction]
-    ret
+    mov [ball_x_pos], al
 
 .move_y:
-    mov [ball_y_pos], r10
+    movzx rax, byte [ball_y_pos] ; Obtener posición Y actual
+    movsx rbx, byte [ball_dir_y] ; Obtener dirección Y
+    add rax, rbx                 ; Calcular nueva posición Y
+    
+    ; Verificar límites Y
+    cmp rax, 1                   ; Verificar límite superior
+    jle .bounce_y
+    cmp rax, row_cells-2        ; Verificar límite inferior
+    je .reset_game
+    mov [ball_y_pos], al         ; Actualizar posición Y si no hay colisión
     ret
 
+.bounce_y:
+    neg byte [ball_dir_y]        ; Invertir dirección Y
+    movzx rax, byte [ball_y_pos]
+    movsx rbx, byte [ball_dir_y]
+    add rax, rbx
+    mov [ball_y_pos], al
+    ret
+
+.reset_game:
+    call reset_positions         ; Llamar a función de reinicio
+    ret
 
 ;	Function: print_pallet
 ; This function moves the pallet in the game
@@ -447,178 +481,157 @@ print_pallet:
 ; Return:
 ;	void
 move_pallet:
-	cmp rdi, left_direction
-	jne .move_right
-	.move_left:
-		mov r8, [pallet_position]  ; Posicion de la paleta
-		cmp byte[r8-1], 'X'        ; Comprobar si hay una X que indique el limite del area de juego
-		je .end                    ; Si hay una X no permite moverse mas
-		mov r9, [pallet_size]	   ; Tamano de la paleta
-		mov byte [r8 + r9 - 1], char_space ; Coloca un espacio en la ultima posicion
-		dec r8  				   ; Mueve la paleta un espacio hacia la izquierda
-		mov [pallet_position], r8  ; Guarda la nueva posicion
-		jmp .end
-	.move_right:
-		mov r8, [pallet_position]
-		mov r9, [pallet_size]
-		cmp byte [r8+r9], 'X'      ; Comprobar si hay una X que indique el limite del area de juego
-		je .end					   ; Si hay una X no permite moverse mas
-		mov byte [r8], char_space
-		inc r8					   ; Mueve la paleta un espacio hacia la derecha
-		mov [pallet_position], r8
-	.end:
-	ret
+    cmp rdi, left_direction
+    jne .move_right
+    .move_left:
+        mov r8, [pallet_position]
+        ; Verificar si hay una X en la siguiente posición a la izquierda
+        cmp byte [r8-1], 'X'
+        je .end                ; Si hay una X, no mover
+        mov r9, [pallet_size]
+        mov byte [r8 + r9 - 1], char_space
+        dec r8
+        mov [pallet_position], r8
+        jmp .end
+    .move_right:
+        mov r8, [pallet_position]
+        mov r9, [pallet_size]
+        ; Verificar si hay una X en la siguiente posición después de la paleta
+        cmp byte [r8 + r9], 'X'
+        je .end                ; Si hay una X, no mover
+        mov byte [r8], char_space
+        inc r8
+        mov [pallet_position], r8
+    .end:
+    ret
 
 ; Funcion: Dibujar bloques
 draw_blocks_m:
-	push rbx
-	push rdx
-	push r12
-	push r13
+    push rbx
+    push rdx
 
-	mov r8, board
-	add r8, ((column_cells+3)+(column_cells2 + 3))*6
-	sub r8, 17                        ; Iniciar 6 filas debajo del limite superior
-	mov r10, 6                        ; Filas
-	lea r12, [block1]      			  ; Guarda la direccion de memoria del bloque 1
-	lea r13, [block2]                 ; Guarda la direccion de memoria del bloque 2
-	xor rbx, rbx                      ; Para alternar entre bloque 1 y bloque 2
+    mov r8, board
+    mov rax, column_cells + 2    ; +2 por los saltos de línea
+    mov rbx, BLOCK_START_ROW
+    mul rbx
+    add r8, rax                  ; r8 ahora apunta a la fila inicial de bloques
+    add r8, 1                    ; Ajustar por el borde izquierdo
+    
+    mov r10, BLOCK_ROWS         ; Contador de filas (6)
 
 .loop_rows:
     cmp r10, 0
     je .blocks_done
 
-    mov r11, 13                       ; Columnas
-    push r8                           ; Posicion inicial de la fila
+    mov r11, BLOCKS_PER_ROW     ; Contador de columnas (13)
+    push r8                     ; Guardar posición inicial de la fila
 
 .loop_columns:
     cmp r11, 0
     je .next_row
-	test rbx, 1						  ; Si el resultado es 0 dibuja el bloque 1, si es 1 dibuja el bloque 2
-	jz .draw_block1
 
-.draw_block2:
-    mov rsi, r13              		  ; Usa bloque 2 (UUUU)
-    jmp .draw_block
+    ; Calcular índice del bloque
+    mov rax, BLOCK_ROWS
+    sub rax, r10               ; Obtener fila actual (0-5)
+    mov rbx, BLOCKS_PER_ROW
+    mul rbx                    ; rax = fila * bloques_por_fila
+    add rax, BLOCKS_PER_ROW
+    sub rax, r11              ; Añadir columna actual
+    
+    ; Verificar si el bloque existe
+    cmp byte [blocks_state + rax], 1
+    jne .draw_empty
 
-.draw_block1:
-    mov rsi, r12                      ; Usa bloque 1 (OOOO)
-
-.draw_block:
-    mov rcx, 4                        ; Contador para los 4 caracteres
-
-.draw_chars:
-    mov al, byte [rsi]                ; Copia un caracter del bloque
-    mov byte [r8], al				  ; Copia el caracter a la posicion del tablero
-    inc rsi
+    ; Dibujar bloque ####
+    mov rcx, BLOCK_WIDTH
+.draw_block_chars:
+    mov byte [r8], '#'
     inc r8
     dec rcx
-    jnz .draw_chars					  ; Repite hasta que se dibujen todos los caracteres
+    jnz .draw_block_chars
+    jmp .after_block
 
-    not rbx                  		  ; Cambiar el bloque para la siguiente iteracion
+.draw_empty:
+    ; Dibujar espacio vacío
+    mov rcx, BLOCK_WIDTH
+.draw_empty_chars:
+    mov byte [r8], ' '
+    inc r8
+    dec rcx
+    jnz .draw_empty_chars
+
+.after_block:
+    ; Añadir espacio entre bloques
+    cmp r11, 1                ; Si no es el último bloque
+    je .skip_space
+    mov byte [r8], ' '        ; Añadir espacio
+    inc r8
+
+.skip_space:
     dec r11
     jmp .loop_columns
 
 .next_row:
-    pop r8                            ; Recupera la posicion inicial de la fila
-    add r8, column_cells+column_cells2 + 3   ; Avanza a la siguiente fila
+    pop r8                    ; Recuperar inicio de la fila
+    add r8, column_cells + 2  ; Avanzar a la siguiente fila
     dec r10
     jmp .loop_rows
 
 .blocks_done:
-    pop r13
-    pop r12
     pop rdx
     pop rbx
     ret
 
-; Funcion: Mostrar la puntuacion
-score_info:
-	push rbx
-	push rdx
-	push r12
-	push r13
-
-	mov r8, board
-	add r8, (column_cells+5)*5
-	sub r8, 5						; Se ubica la posicion donde se quiere colocar el puntaje
-	mov rsi, score_text			    ; Texto 'PUNTAJE'
-	mov rcx, score_length			; Longitud del texto
-	call write_score				; Se llama a la funcion para escribir el texto correspondiente
-
-	mov rdi, [current_score]		; Valor actual del puntaje
-    call num_to_str					; Se llama a la funcion para convertir numeros a texto
-
-	add r8, (column_cells+5)*10
-	add r8, 16						; Se ubica la posicion donde se quiere colocar el nivel
-
-	mov rsi, level_text				; Texto 'NIVEL'
-	mov rcx, level_length			; Longitud del texto
-	call write_score
-
-	mov rdi, [current_level]		; Valor del nivel actual
-    call num_to_str
-
-	add r8, (column_cells+5)*15
-	sub r8, 46						; Se ubica la posicion donde se quieren colocar las vidas
-
-	mov rsi, lives_text				; Texto 'VIDAS'
-	mov rcx, lives_length			; Longitud del texto
-	call write_score
-
-	mov rdi, [current_lives]		; Valor de vidas actuales
-    call num_to_str
-
-	pop r13
-	pop r12
-	pop rdx
-	pop rbx
-	ret
-
-; Funcion para convertir numero a string
-num_to_str:
-	push rbx
-	push rdx
-	mov rbx, 10			; Divisor para obtener los digitos
-	mov rax, rdi        ; Numero a convertir (niveles, vidas o puntos)
-    xor rcx, rcx        ; Contador
-
-.divide_loop:
-    xor rdx, rdx        ; Limpiar rdx para la division
-    div rbx             ; Dividir por 10
-    push rdx            ; Guardar el residuo en el stack
-    inc rcx             ; Incrementar contador
-    test rax, rax       ; Verificar si quedan digitos
-    jnz .divide_loop
-
-.write_loop:
-    pop rdx             ; Obtener digitos del stack
-    add dl, '0'         ; Convertir a ASCII
-    mov [r8], dl        ; Escribir digito
-    inc r8              ; Siguiente espacio en memoria
-    dec rcx             ; Decrementar contador
-    jnz .write_loop
-
-    pop rdx
-    pop rbx
-    ret
-
-; Funcion para escribir texto
-write_score:
+check_block_collision:
+    push rbx
     push rcx
-    push rsi
+    push rdx
 
-.write_loop:
-    mov al, byte [rsi]
-    mov [r8], al
-    inc rsi
-    inc r8
-    dec rcx
-    jnz .write_loop
+    ; Obtener posición Y de la pelota
+    mov rax, [ball_y_pos]
+    sub rax, BLOCK_START_ROW
+    cmp rax, 0
+    jl .no_collision
+    cmp rax, BLOCK_ROWS
+    jge .no_collision
 
-    pop rsi
+    ; Calcular índice del bloque
+    mov rbx, BLOCKS_PER_ROW
+    mul rbx                    ; rax = fila * bloques_por_fila
+    
+    ; Obtener posición X y calcular columna
+    mov rcx, [ball_x_pos]
+    sub rcx, 1                ; Ajustar por el borde izquierdo
+    mov rax, rcx
+    mov rbx, BLOCK_WIDTH + BLOCK_SPACING
+    xor rdx, rdx
+    div rbx                   ; Dividir por (ancho_bloque + espacio)
+    
+    cmp rax, BLOCKS_PER_ROW
+    jge .no_collision
+    
+    ; Calcular índice final del bloque
+    mov rbx, [ball_y_pos]
+    sub rbx, BLOCK_START_ROW
+    imul rbx, BLOCKS_PER_ROW
+    add rax, rbx
+    
+    ; Verificar si hay un bloque
+    cmp byte [blocks_state + rax], 1
+    jne .no_collision
+
+    ; Destruir el bloque
+    mov byte [blocks_state + rax], 0
+    
+    ; Hacer que la pelota rebote
+    neg qword [ball_dir_y]
+
+.no_collision:
+    pop rdx
     pop rcx
+    pop rbx
     ret
+
 
 _start:
 	call canonical_off
@@ -627,22 +640,26 @@ _start:
 
 
 	.main_loop:
-        ; Se usa un contador para la bola para no afectar la velocidad de respuesta de la paleta
+        ; Incrementar contador de la pelota
         inc qword [ball_counter]
         mov rax, [ball_counter]
         cmp rax, [ball_move]
-        jl .skip_ball_move        ; Si el contador es menor que el limite establecido no se
+        jl .skip_ball_move
+    
+        ; Reiniciar contador y mover pelota
         mov qword [ball_counter], 0
         call move_ball
 
     .skip_ball_move:
+        ; Limpiar la posición anterior de la pelota
+        print clear, clear_length
+        call clear_board
+        
+        call draw_blocks_m
 		call print_pallet
-		call draw_blocks_m
-		call score_info
-        call print_ball
+		call print_ball
 		print board, board_size
 
-	.read_more:
 		getchar
 
 		cmp rax, 1
@@ -651,35 +668,26 @@ _start:
 		mov al,[input_char]
 
 		cmp al, 'a'
-	    jne .not_left
+	    je .move_left2
+        cmp al, 'd'
+	    je .move_right2
+        cmp al, 'q'
+        je exit
+        jmp .done
+
+    .move_left2:
 	    mov rdi, left_direction
 		call move_pallet
 	    jmp .done
 
-		.not_left:
-		 	cmp al, 'd'
-	    	jne .not_right
-			mov rdi, right_direction
-	    	call move_pallet
-    		jmp .done
+	.move_right2:
+		mov rdi, right_direction
+	    call move_pallet
 
-		.not_right:
-
-    		cmp al, 'q'
-    		je exit
-
-			jmp .read_more
-
-		.done:
-			;unsetnonblocking
-			sleeptime
-			print clear, clear_length
-    		jmp .main_loop
-
-		print clear, clear_length
-
-		jmp exit
-
+	.done:
+		sleeptime
+    	jmp .main_loop
+		
 
 start_screen:
 
