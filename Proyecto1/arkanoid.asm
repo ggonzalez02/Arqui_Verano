@@ -21,6 +21,8 @@ column_cells: 	equ 67 ; set to any (reasonable) value you wish
 array_length:	equ row_cells * column_cells + row_cells ; cells are mapped to bytes in the array and a new line char ends each row
 BLOCK_WIDTH equ 4        ; Ancho de cada bloque
 BLOCK_SPACING equ 1      ; Espacio entre bloques
+POWER_SHOOT equ 1        ; Tipo de power-up de disparo
+POWER_LIFE equ 2         ; Tipo de power-up de vida extra
 
 ;This is regarding the sleep time
 timespec:
@@ -309,12 +311,27 @@ section .data
     powerup_y dq 0            ; Posición Y del power-up cayendo
     powerup_active dq 0        ; Si hay un power-up cayendo
     powerup_char db 'S'       ; Carácter para el power-up de disparo
+    powerup_life_char db 'L'  ; Carácter para el power-up de vida extra
+    powerup_type dq 0         ; 0 = ninguno, 1 = disparo, 2 = vida extra
     auto_shoot_timer dq 0      ; Temporizador para el disparo automático
     auto_shoot_rate dq 20      ; Frecuencia de disparo automático
     blocks_destroyed dq 0      ; Contador de bloques destruidos
     blocks_for_powerup dq 3    ; Número de bloques que hay que destruir para que aparezca un power-up
+    random_seed dq 12345      ; Semilla para generación de números aleatorios
 
 section .text
+
+generate_random:
+    push rdx
+    mov rax, [random_seed]
+    mov rdx, 1103515245
+    mul rdx
+    add rax, 12345
+    mov [random_seed], rax
+    shr rax, 16
+    and rax, 0x7FFF
+    pop rdx
+    ret
 
 clear_board:
     push rbx
@@ -840,20 +857,19 @@ handle_block_destruction:
     cmp qword [powerup_active], 1
     je .no_spawn
     
-    ; Verificar si debemos generar un power-up (cada 5 bloques)
+    ; Simplificar la lógica de generación de power-up
+    ; Generar power-up cada 3 bloques destruidos
     mov rax, [blocks_destroyed]
-    mov rcx, 5                         ; Queremos un power-up cada 5 bloques
+    mov rcx, 3
     xor rdx, rdx
-    div rcx                           ; Divide blocks_destroyed por 5
-    test rdx, rdx                     ; Verifica si hay residuo
-    jnz .no_spawn                     ; Si hay residuo, no generar power-up
-    cmp rax, 0                        ; Si el resultado es 0, no generar power-up
-    je .no_spawn
+    div rcx
+    test rdx, rdx                     ; Si el residuo es 0, generar power-up
+    jnz .no_spawn
     
-    ; Calcular la posición del bloque destruido
-    mov rax, r10                      ; Recuperar índice del bloque
-    xor rdx, rdx
+    ; Calcular posición del bloque destruido
+    mov rax, r10                      
     mov rcx, BLOCKS_PER_ROW
+    xor rdx, rdx
     div rcx                           ; rax = fila, rdx = columna
     
     ; Calcular posición Y
@@ -867,9 +883,15 @@ handle_block_destruction:
     add rax, 2                        ; Ajustar por el borde
     mov [powerup_x], rax
     
+    ; Elegir tipo de power-up aleatoriamente
+    call generate_random
+    and rax, 1                        ; 0 o 1
+    inc rax                           ; 1 o 2
+    mov [powerup_type], rax
+    
     ; Activar el power-up
     mov qword [powerup_active], 1
-    
+
 .no_spawn:
     ret
 
@@ -1064,9 +1086,8 @@ update_powerup:
     cmp qword [powerup_active], 0
     je .done
     
-    ; Mover el power-up hacia abajo cada ciertos ciclos (más lento)
     mov rax, [ball_counter]
-    mov rcx, 40                ; Aumentado para que caiga más lento
+    mov rcx, 40                
     xor rdx, rdx
     div rcx
     test rdx, rdx
@@ -1074,13 +1095,11 @@ update_powerup:
     
     inc qword [powerup_y]
     
-    ; Verificar si llegó al fondo
     cmp qword [powerup_y], row_cells-2
     jge .deactivate
     
-    ; Verificar colisión con la paleta
     mov rax, [powerup_y]
-    cmp rax, 27                  ; Altura de la paleta
+    cmp rax, 27                  
     jne .done
     
     mov rcx, [powerup_x]
@@ -1095,13 +1114,24 @@ update_powerup:
     cmp rcx, rdx
     jg .done
     
-    ; Colisión con la paleta - activar power-up
+    ; Verificar tipo de power-up
+    mov rax, [powerup_type]
+    cmp rax, POWER_SHOOT
+    je .activate_shoot
+    cmp rax, POWER_LIFE
+    je .activate_life
+    jmp .deactivate
+
+.activate_shoot:
     call activate_shooting
-    mov qword [powerup_active], 0
-    jmp .done
-    
+    jmp .deactivate
+
+.activate_life:
+    call activate_extra_life
+
 .deactivate:
     mov qword [powerup_active], 0
+
 .done:
     ret
 
@@ -1140,18 +1170,31 @@ print_powerup:
     cmp qword [powerup_active], 0
     je .done
     
-    ; Calcular posición en el tablero
     mov rax, [powerup_y]
     mov rbx, column_cells + 2
     mul rbx
     add rax, [powerup_x]
     add rax, board
     
-    ; Dibujar el power-up
-    mov bl, [powerup_char]
-    mov [rax], bl
-    
+    mov rcx, [powerup_type]
+    cmp rcx, POWER_SHOOT
+    je .print_shoot
+    cmp rcx, POWER_LIFE
+    je .print_life
+    jmp .done
+
+.print_shoot:
+    mov byte [rax], 'S'               ; Dibujar S directamente
+    jmp .done
+
+.print_life:
+    mov byte [rax], 'L'               ; Dibujar L directamente
+
 .done:
+    ret
+
+activate_extra_life:
+    inc qword [lives]
     ret
 
 _start:
@@ -1160,6 +1203,8 @@ _start:
     mov qword [level], 1   ; Inicializar level en 1
     mov qword [lives], 5   ; Inicializar lives en 5
     mov qword [blocks_destroyed], 0
+    mov qword [powerup_active], 0    ; Inicializar estado de power-up
+    mov qword [powerup_type], 0      ; Inicializar tipo de power-up
 
 	call canonical_off
 	print clear, clear_length
