@@ -23,6 +23,7 @@ BLOCK_WIDTH equ 4        ; Ancho de cada bloque
 BLOCK_SPACING equ 1      ; Espacio entre bloques
 POWER_SHOOT equ 1        ; Tipo de power-up de disparo
 POWER_LIFE equ 2         ; Tipo de power-up de vida extra
+POWER_BALLS equ 3         ; Tipo de power-up de bolas extra
 
 ;This is regarding the sleep time
 timespec:
@@ -318,6 +319,25 @@ section .data
     blocks_destroyed dq 0      ; Contador de bloques destruidos
     blocks_for_powerup dq 3    ; Número de bloques que hay que destruir para que aparezca un power-up
     random_seed dq 12345      ; Semilla para generación de números aleatorios
+    powerup_balls_char db 'B'    ; Carácter para el power-up de bolas extra
+    active_balls_count dq 1   ; Contador de bolas activas (empieza con 1, la bola principal)
+    ball_active dq 1
+
+    ; Variables para las bolas extra
+    ball2_x_pos: dq 34
+    ball2_y_pos: dq 26
+    ball2_dir_x dq 1
+    ball2_dir_y dq -1
+    ball2_active dq 0
+    
+    ball3_x_pos: dq 34
+    ball3_y_pos: dq 26
+    ball3_dir_x dq -1
+    ball3_dir_y dq -1
+    ball3_active dq 0
+    
+    ; Ajustar la velocidad de caída de power-ups
+    powerup_fall_rate dq 500 
 
 section .text
 
@@ -370,48 +390,64 @@ clear_board:
 ; Return:
 ;	Void
 print_ball:
-    push rbx
-    push rcx
-    
-    ; Calcular la posición exacta en el tablero
+    ; Imprimir bola principal
     mov r8, [ball_y_pos]
     mov r9, [ball_x_pos]
-    
-    ; Calcular el offset en el tablero
     mov rax, column_cells + 2
     mul r8
     add rax, r9
-    
-    ; Colocar la pelota en la posición correcta
     add rax, board
     mov byte [rax], char_O
     
-    pop rcx
-    pop rbx
+    ; Imprimir segunda bola si está activa
+    cmp qword [ball2_active], 0
+    je .check_ball3
+    mov r8, [ball2_y_pos]
+    mov r9, [ball2_x_pos]
+    mov rax, column_cells + 2
+    mul r8
+    add rax, r9
+    add rax, board
+    mov byte [rax], char_O
+    
+.check_ball3:
+    ; Imprimir tercera bola si está activa
+    cmp qword [ball3_active], 0
+    je .done
+    mov r8, [ball3_y_pos]
+    mov r9, [ball3_x_pos]
+    mov rax, column_cells + 2
+    mul r8
+    add rax, r9
+    add rax, board
+    mov byte [rax], char_O
+    
+.done:
     ret
 
 reset_positions:
     push rbx
     push rcx
     
-    ; Reiniciar posición de la bola
+    ; Reiniciar la bola principal
     mov rax, [initial_ball_x]
     mov [ball_x_pos], rax
     mov rax, [initial_ball_y]
     mov [ball_y_pos], rax
+    mov qword [ball_dir_y], -1
+    mov qword [ball_dir_x], 1
+    mov qword [ball_active], 1
     
-    ; Reiniciar dirección de la bola (hacia arriba)
-    mov rax, 1
-    neg rax
-    mov [ball_dir_y], rax   ; Dirección Y negativa (hacia arriba)
-    mov rax, 1
-    mov [ball_dir_x], rax   ; Dirección X positiva
+    ; Reiniciar las bolas extra
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1  ; Siempre volver a 1 bola
     
-    ; Reiniciar posición de la paleta
+    ; Reiniciar la paleta
     mov rax, [initial_pallet_pos]
     mov [pallet_position], rax
     
-    ; Reiniciar contador de la bola
+    ; Reiniciar el contador
     mov qword [ball_counter], 0
     
     pop rcx
@@ -422,13 +458,17 @@ reset_positions:
 ; Función para mover la pelota y manejar colisiones
 ; Función para mover la pelota y manejar todas las colisiones
 move_ball:
+    ; Verificar si la bola está activa
+    cmp qword [ball_active], 0
+    je .done
+
     ; Comprobar colisión con bloques primero
     movzx rax, byte [ball_y_pos]
     sub eax, BLOCK_START_ROW      
     cmp rax, 0
-    jl .check_paddle              
+    jl .check_walls              
     cmp rax, BLOCK_ROWS
-    jge .check_paddle
+    jge .check_walls
     
     ; Calcular índice del bloque
     push rax                      
@@ -440,7 +480,7 @@ move_ball:
     div ebx
     
     cmp eax, BLOCKS_PER_ROW
-    jge .check_paddle_pop
+    jge .check_walls_pop
     
     pop rbx                       
     push rax                      
@@ -451,30 +491,56 @@ move_ball:
     pop rcx
     add rax, rcx
     
-    ; Verificar si el índice está dentro de los límites antes de acceder
-    cmp rax, BLOCK_ROWS * BLOCKS_PER_ROW
-    jge .check_paddle
-    
     ; Verificar si hay un bloque y actualizarlo
-
     cmp byte [blocks_state + rax], 1
-    jne .check_paddle
+    jne .check_walls
     
     push rax                        ; Guardar el índice del bloque
     call handle_block_destruction   ; Manejar la destrucción del bloque
     pop rax
     
     neg byte [ball_dir_y]          ; Hacer que la pelota rebote
-    jmp .move_x
+    jmp .check_walls
 
-.check_paddle_pop:
+.check_walls_pop:
     pop rax
 
-.check_paddle:
-    ; Verificar colisión con la paleta
+.check_walls:
+    ; Mover en X
+    movzx rax, byte [ball_x_pos]
+    movsx rbx, byte [ball_dir_x]
+    add rax, rbx
+
+    ; Verificar colisiones en X
+    cmp rax, 1
+    jle .bounce_x
+    cmp rax, column_cells-1
+    jge .bounce_x
+    mov [ball_x_pos], al
+    jmp .move_y
+
+.bounce_x:
+    neg byte [ball_dir_x]
+    movzx rax, byte [ball_x_pos]
+    movsx rbx, byte [ball_dir_x]
+    add rax, rbx
+    mov [ball_x_pos], al
+
+.move_y:
     movzx rax, byte [ball_y_pos]
-    cmp rax, 27                  ; Altura de la paleta
-    jne .move_x
+    movsx rbx, byte [ball_dir_y]
+    add rax, rbx
+
+    ; Verificar colisiones en Y
+    cmp rax, 1
+    jle .bounce_y
+    cmp rax, row_cells-1
+    jge .ball_lost
+    mov [ball_y_pos], al
+    
+    ; Verificar colisión con la paleta
+    cmp rax, 27
+    jne .done
     
     movzx rcx, byte [ball_x_pos]
     mov rdx, [pallet_position]
@@ -482,61 +548,41 @@ move_ball:
     sub rdx, 27 * (column_cells + 2)
     
     cmp rcx, rdx
-    jl .move_x
+    jl .done
     
     add rdx, [pallet_size]
     cmp rcx, rdx
-    jg .move_x
+    jg .done
     
-    neg byte [ball_dir_y]        ; Rebotar en la paleta
-
-.move_x:
-    movzx rax, byte [ball_x_pos] ; Obtener posición X actual
-    movsx rbx, byte [ball_dir_x] ; Obtener dirección X
-    add rax, rbx                 ; Calcular nueva posición X
-    
-    cmp rax, 1                   ; Verificar límite izquierdo
-    jle .bounce_x
-    cmp rax, column_cells-1      ; Verificar límite derecho
-    jge .bounce_x
-    mov [ball_x_pos], al         ; Actualizar posición X
-    jmp .move_y
-
-.bounce_x:
-    neg byte [ball_dir_x]        ; Invertir dirección X
-    movzx rax, byte [ball_x_pos]
-    movsx rbx, byte [ball_dir_x]
-    add rax, rbx
-    mov [ball_x_pos], al
-
-.move_y:
-    movzx rax, byte [ball_y_pos] ; Obtener posición Y actual
-    movsx rbx, byte [ball_dir_y] ; Obtener dirección Y
-    add rax, rbx                 ; Calcular nueva posición Y
-    
-    cmp rax, 1                   ; Verificar límite superior
-    jle .bounce_y
-    cmp rax, row_cells-1         ; Verificar límite inferior
-    jge .ball_lost
-    mov [ball_y_pos], al         ; Actualizar posición Y
-    ret
-
-.ball_lost:
-    dec qword [lives]            ; Decrementar vidas
-    mov rax, [lives]
-    test rax, rax               ; Verificar si quedan vidas
-    jz exit                     ; Si no quedan vidas, terminar
-    call reset_positions        ; Resetear posiciones
-    ret
+    neg byte [ball_dir_y]
+    jmp .done
 
 .bounce_y:
-    neg byte [ball_dir_y]        ; Invertir dirección Y
+    neg byte [ball_dir_y]
     movzx rax, byte [ball_y_pos]
     movsx rbx, byte [ball_dir_y]
     add rax, rbx
     mov [ball_y_pos], al
-    ret
+    jmp .done
 
+.ball_lost:
+    mov qword [ball_active], 0
+    dec qword [active_balls_count]
+    
+    cmp qword [active_balls_count], 0
+    jg .done
+    
+    dec qword [lives]
+    mov rax, [lives]
+    test rax, rax
+    jz exit
+    
+    call reset_positions
+    mov qword [ball_active], 1
+    mov qword [active_balls_count], 1
+
+.done:
+    ret
 
 ;	Function: print_pallet
 ; This function moves the pallet in the game
@@ -863,7 +909,8 @@ handle_block_destruction:
     mov rcx, 3
     xor rdx, rdx
     div rcx
-    test rdx, rdx                     ; Si el residuo es 0, generar power-up
+    test rdx, rdx     
+    
     jnz .no_spawn
     
     ; Calcular posición del bloque destruido
@@ -885,8 +932,8 @@ handle_block_destruction:
     
     ; Elegir tipo de power-up aleatoriamente
     call generate_random
-    and rax, 1                        ; 0 o 1
-    inc rax                           ; 1 o 2
+    and rax, 3                        ; 0-2
+    inc rax                           ; 1-3
     mov [powerup_type], rax
     
     ; Activar el power-up
@@ -1086,8 +1133,9 @@ update_powerup:
     cmp qword [powerup_active], 0
     je .done
     
+    ; Mover el power-up hacia abajo más lento
     mov rax, [ball_counter]
-    mov rcx, 40                
+    mov rcx, [powerup_fall_rate]    ; Usar la nueva variable de velocidad
     xor rdx, rdx
     div rcx
     test rdx, rdx
@@ -1095,9 +1143,11 @@ update_powerup:
     
     inc qword [powerup_y]
     
+    ; Verificar si llegó al fondo
     cmp qword [powerup_y], row_cells-2
     jge .deactivate
     
+    ; Verificar colisión con la paleta
     mov rax, [powerup_y]
     cmp rax, 27                  
     jne .done
@@ -1120,6 +1170,8 @@ update_powerup:
     je .activate_shoot
     cmp rax, POWER_LIFE
     je .activate_life
+    cmp rax, POWER_BALLS
+    je .activate_balls
     jmp .deactivate
 
 .activate_shoot:
@@ -1128,6 +1180,11 @@ update_powerup:
 
 .activate_life:
     call activate_extra_life
+    jmp .deactivate
+
+.activate_balls:
+    call activate_extra_balls
+    jmp .deactivate
 
 .deactivate:
     mov qword [powerup_active], 0
@@ -1181,20 +1238,297 @@ print_powerup:
     je .print_shoot
     cmp rcx, POWER_LIFE
     je .print_life
+    cmp rcx, POWER_BALLS
+    je .print_balls
     jmp .done
 
 .print_shoot:
-    mov byte [rax], 'S'               ; Dibujar S directamente
-    jmp .done
+    mov bl, [powerup_char]
+    jmp .draw
 
 .print_life:
-    mov byte [rax], 'L'               ; Dibujar L directamente
+    mov bl, [powerup_life_char]
+    jmp .draw
 
+.print_balls:
+    mov bl, [powerup_balls_char]
+
+.draw:
+    mov [rax], bl
+    
 .done:
     ret
 
 activate_extra_life:
     inc qword [lives]
+    ret
+
+activate_extra_balls:
+    ; Incrementar contador de bolas activas
+    add qword [active_balls_count], 2
+
+    ; Activar segunda bola
+    mov qword [ball2_active], 1
+    mov rax, [ball_x_pos]
+    mov [ball2_x_pos], rax
+    mov rax, [ball_y_pos]
+    mov [ball2_y_pos], rax
+    mov qword [ball2_dir_x], 1    ; Dirección inicial diferente
+    mov qword [ball2_dir_y], -1
+    
+    ; Activar tercera bola
+    mov qword [ball3_active], 1
+    mov rax, [ball_x_pos]
+    mov [ball3_x_pos], rax
+    mov rax, [ball_y_pos]
+    mov [ball3_y_pos], rax
+    mov qword [ball3_dir_x], -1   ; Dirección inicial diferente
+    mov qword [ball3_dir_y], -1
+    ret
+
+move_extra_balls:
+    ; Verificar ball2
+    cmp qword [ball2_active], 0
+    je .check_ball3
+
+    ; Comprobar colisión con bloques para ball2
+    movzx rax, byte [ball2_y_pos]
+    sub eax, BLOCK_START_ROW      
+    cmp rax, 0
+    jl .move_ball2              
+    cmp rax, BLOCK_ROWS
+    jge .move_ball2
+    
+    ; Calcular índice del bloque para ball2
+    push rax                      
+    movzx rcx, byte [ball2_x_pos]
+    sub ecx, 1
+    mov eax, ecx
+    xor edx, edx
+    mov ebx, BLOCK_WIDTH + 1      
+    div ebx
+    
+    cmp eax, BLOCKS_PER_ROW
+    jge .move_ball2_pop
+    
+    pop rbx                       
+    push rax                      
+    
+    mov rax, rbx
+    mov rcx, BLOCKS_PER_ROW
+    mul rcx
+    pop rcx
+    add rax, rcx
+    
+    cmp byte [blocks_state + rax], 1
+    jne .move_ball2
+    
+    push rax                        
+    call handle_block_destruction   
+    pop rax
+    
+    neg byte [ball2_dir_y]         
+    jmp .move_ball2
+
+.move_ball2_pop:
+    pop rax
+
+.move_ball2:
+    ; Mover ball2 en X
+    movzx rax, byte [ball2_x_pos]
+    movsx rbx, byte [ball2_dir_x]
+    add rax, rbx
+    
+    cmp rax, 1
+    jle .bounce_x2
+    cmp rax, column_cells-1
+    jge .bounce_x2
+    mov [ball2_x_pos], al
+    jmp .move_y2
+
+.bounce_x2:
+    neg byte [ball2_dir_x]
+    movzx rax, byte [ball2_x_pos]
+    movsx rbx, byte [ball2_dir_x]
+    add rax, rbx
+    mov [ball2_x_pos], al
+
+.move_y2:
+    movzx rax, byte [ball2_y_pos]
+    movsx rbx, byte [ball2_dir_y]
+    add rax, rbx
+    
+    cmp rax, 1
+    jle .bounce_y2
+    cmp rax, row_cells-1
+    jge .deactivate_ball2
+    mov [ball2_y_pos], al
+    
+    ; Verificar colisión con la paleta para ball2
+    cmp rax, 27
+    jne .check_ball3
+    
+    movzx rcx, byte [ball2_x_pos]
+    mov rdx, [pallet_position]
+    sub rdx, board
+    sub rdx, 27 * (column_cells + 2)
+    
+    cmp rcx, rdx
+    jl .check_ball3
+    
+    add rdx, [pallet_size]
+    cmp rcx, rdx
+    jg .check_ball3
+    
+    neg byte [ball2_dir_y]
+    jmp .check_ball3
+
+.bounce_y2:
+    neg byte [ball2_dir_y]
+    movzx rax, byte [ball2_y_pos]
+    movsx rbx, byte [ball2_dir_y]
+    add rax, rbx
+    mov [ball2_y_pos], al
+    jmp .check_ball3
+
+.deactivate_ball2:
+    mov qword [ball2_active], 0
+    dec qword [active_balls_count]   ; Reducir contador
+    
+    ; Si era la última bola, perder vida
+    cmp qword [active_balls_count], 0
+    jg .check_ball3                  ; Si quedan bolas, continuar
+    
+    dec qword [lives]
+    mov rax, [lives]
+    test rax, rax
+    jz exit
+    call reset_positions
+    mov qword [ball_active], 1
+    mov qword [active_balls_count], 1
+    jmp .done
+
+.check_ball3:
+    cmp qword [ball3_active], 0
+    je .done
+
+    ; Comprobar colisión con bloques para ball3
+    movzx rax, byte [ball3_y_pos]
+    sub eax, BLOCK_START_ROW      
+    cmp rax, 0
+    jl .move_ball3              
+    cmp rax, BLOCK_ROWS
+    jge .move_ball3
+    
+    ; Calcular índice del bloque para ball3
+    push rax                      
+    movzx rcx, byte [ball3_x_pos]
+    sub ecx, 1
+    mov eax, ecx
+    xor edx, edx
+    mov ebx, BLOCK_WIDTH + 1      
+    div ebx
+    
+    cmp eax, BLOCKS_PER_ROW
+    jge .move_ball3_pop
+    
+    pop rbx                       
+    push rax                      
+    
+    mov rax, rbx
+    mov rcx, BLOCKS_PER_ROW
+    mul rcx
+    pop rcx
+    add rax, rcx
+    
+    cmp byte [blocks_state + rax], 1
+    jne .move_ball3
+    
+    push rax                        
+    call handle_block_destruction   
+    pop rax
+    
+    neg byte [ball3_dir_y]         
+    jmp .move_ball3
+
+.move_ball3_pop:
+    pop rax
+
+.move_ball3:    
+    ; Mover ball3 en X
+    movzx rax, byte [ball3_x_pos]
+    movsx rbx, byte [ball3_dir_x]
+    add rax, rbx
+    
+    cmp rax, 1
+    jle .bounce_x3
+    cmp rax, column_cells-1
+    jge .bounce_x3
+    mov [ball3_x_pos], al
+    jmp .move_y3
+
+.bounce_x3:
+    neg byte [ball3_dir_x]
+    movzx rax, byte [ball3_x_pos]
+    movsx rbx, byte [ball3_dir_x]
+    add rax, rbx
+    mov [ball3_x_pos], al
+
+.move_y3:
+    movzx rax, byte [ball3_y_pos]
+    movsx rbx, byte [ball3_dir_y]
+    add rax, rbx
+    
+    cmp rax, 1
+    jle .bounce_y3
+    cmp rax, row_cells-1
+    jge .deactivate_ball3
+    mov [ball3_y_pos], al
+    
+    ; Verificar colisión con la paleta para ball3
+    cmp rax, 27
+    jne .done
+    
+    movzx rcx, byte [ball3_x_pos]
+    mov rdx, [pallet_position]
+    sub rdx, board
+    sub rdx, 27 * (column_cells + 2)
+    
+    cmp rcx, rdx
+    jl .done
+    
+    add rdx, [pallet_size]
+    cmp rcx, rdx
+    jg .done
+    
+    neg byte [ball3_dir_y]
+    jmp .done
+
+.bounce_y3:
+    neg byte [ball3_dir_y]
+    movzx rax, byte [ball3_y_pos]
+    movsx rbx, byte [ball3_dir_y]
+    add rax, rbx
+    mov [ball3_y_pos], al
+    jmp .done
+
+.deactivate_ball3:
+    mov qword [ball3_active], 0
+    dec qword [active_balls_count]
+    
+    ; Si era la última bola, perder vida
+    cmp qword [active_balls_count], 0
+    jg .done                        ; Si quedan bolas, continuar
+    
+    dec qword [lives]
+    mov rax, [lives]
+    test rax, rax
+    jz exit
+    call reset_positions
+    mov qword [ball_active], 1
+    mov qword [active_balls_count], 1
+
+.done:
     ret
 
 _start:
@@ -1205,6 +1539,10 @@ _start:
     mov qword [blocks_destroyed], 0
     mov qword [powerup_active], 0    ; Inicializar estado de power-up
     mov qword [powerup_type], 0      ; Inicializar tipo de power-up
+    mov qword [active_balls_count], 1  ; Inicializar contador de bolas
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [ball_active], 1  
 
 	call canonical_off
 	print clear, clear_length
@@ -1221,6 +1559,7 @@ _start:
         ; Reiniciar contador y mover pelota
         mov qword [ball_counter], 0
         call move_ball
+        call move_extra_balls
 
     .skip_ball_move:
         ; Limpiar la posición anterior de la pelota
