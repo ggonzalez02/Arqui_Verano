@@ -24,6 +24,7 @@ BLOCK_SPACING equ 1      ; Espacio entre bloques
 POWER_SHOOT equ 1        ; Tipo de power-up de disparo
 POWER_LIFE equ 2         ; Tipo de power-up de vida extra
 POWER_BALLS equ 3         ; Tipo de power-up de bolas extra
+POWER_STICKY equ 4 
 
 ;This is regarding the sleep time
 timespec:
@@ -44,7 +45,7 @@ msg3: db "        PROFESOR: ERNESTO RIVERA ALVARADO        ", 0xA, 0xD
 msg4: db "        ARQUITECTURA DE COMPUTADORAS        ", 0xA, 0xD
 msg5: db "        PROYECTO 1: ARKANOID         ", 0xA, 0xD
 msg6: db "        INSTRUCCIONES: PRESIONE A PARA MOVERSE A LA IZQUIERDA Y D PARA MOVERSE A LA DERECHA   ", 0xA, 0xD
-msg7: db "        PRESIONE ENTER PARA INICIAR        ", 0xA, 0xD
+msg7: db "        PRESIONE ENTER PARA INICIAR Y ESPACIO PARA LANZAR LA PELOTA O DISPARAR       ", 0xA, 0xD
 msg8: db "        PRESIONE Q PARA SALIR        ", 0xA, 0xD
 msg1_length:	equ $-msg1
 msg2_length:	equ $-msg2
@@ -248,15 +249,16 @@ right_direction: equ 1
 
 
 section .data
+    game_started dq 0    ; 0 = waiting for space, 1 = game in progress
 	pallet_position dq board + 34 + 27 * (column_cells +2)
 	pallet_size dq 3
 
 	ball_x_pos: dq 34
 	ball_y_pos: dq 26
     ball_dir_x dq 1
-    ball_dir_y dq 1
+    ball_dir_y dq -1
     ball_counter dq 0        ; Contador actual
-    ball_move dq 40          ; Límite para mover la pelota (ajustar este valor para cambiar la velocidad)
+    ball_move dq 100          ; Límite para mover la pelota (ajustar este valor para cambiar la velocidad)
 
     block_shape db "####"    ; Forma del bloque
     block_empty db "    "    ; Espacio vacío del mismo ancho que un bloque
@@ -322,6 +324,9 @@ section .data
     powerup_balls_char db 'B'    ; Carácter para el power-up de bolas extra
     active_balls_count dq 1   ; Contador de bolas activas (empieza con 1, la bola principal)
     ball_active dq 1
+    powerup_sticky_char db 'P'       ; Carácter para el power-up sticky
+    has_sticky dq 0                  ; Estado del power-up sticky
+    ball_stuck dq 0                  ; Indica si la bola está pegada a la paleta
 
     ; Variables para las bolas extra
     ball2_x_pos: dq 34
@@ -337,7 +342,7 @@ section .data
     ball3_active dq 0
     
     ; Ajustar la velocidad de caída de power-ups
-    powerup_fall_rate dq 500 
+    powerup_fall_rate dq 2000 
 
 section .text
 
@@ -428,26 +433,37 @@ print_ball:
 reset_positions:
     push rbx
     push rcx
+
+    call deactivate_all_powerups 
     
-    ; Reiniciar la bola principal
-    mov rax, [initial_ball_x]
-    mov [ball_x_pos], rax
-    mov rax, [initial_ball_y]
+    ; Calcular posición inicial de la bola sobre la paleta
+    mov rax, [pallet_position]
+    sub rax, board                    ; Obtener offset desde inicio del tablero
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx                          ; rax = fila, rdx = columna
+    
+    ; Establecer Y una fila arriba de la paleta
     mov [ball_y_pos], rax
-    mov qword [ball_dir_y], -1
-    mov qword [ball_dir_x], 1
-    mov qword [ball_active], 1
+    dec qword [ball_y_pos]
     
-    ; Reiniciar las bolas extra
+    ; Calcular X para centrar sobre la paleta
+    mov rax, rdx                     ; Usar la columna original
+    add rax, 1                       ; Ajustar para centrar
+    mov [ball_x_pos], rax
+    
+    ; Establecer direcciones iniciales
+    mov qword [ball_dir_y], -1       ; Irá hacia arriba cuando comience
+    mov qword [ball_dir_x], 1        ; Irá hacia la derecha cuando comience
+    mov qword [ball_active], 1
+    mov qword [game_started], 0
+    
+    ; Reiniciar bolas extra
     mov qword [ball2_active], 0
     mov qword [ball3_active], 0
-    mov qword [active_balls_count], 1  ; Siempre volver a 1 bola
+    mov qword [active_balls_count], 1
     
-    ; Reiniciar la paleta
-    mov rax, [initial_pallet_pos]
-    mov [pallet_position], rax
-    
-    ; Reiniciar el contador
+    ; Reiniciar contador
     mov qword [ball_counter], 0
     
     pop rcx
@@ -458,6 +474,12 @@ reset_positions:
 ; Función para mover la pelota y manejar colisiones
 ; Función para mover la pelota y manejar todas las colisiones
 move_ball:
+    cmp qword [ball_stuck], 1
+    je .follow_paddle
+    ; Verificar si el juego ha comenzado
+    cmp qword [game_started], 0
+    je .follow_paddle
+    
     ; Verificar si la bola está activa
     cmp qword [ball_active], 0
     je .done
@@ -495,11 +517,11 @@ move_ball:
     cmp byte [blocks_state + rax], 1
     jne .check_walls
     
-    push rax                        ; Guardar el índice del bloque
-    call handle_block_destruction   ; Manejar la destrucción del bloque
+    push rax                        
+    call handle_block_destruction   
     pop rax
     
-    neg byte [ball_dir_y]          ; Hacer que la pelota rebote
+    neg byte [ball_dir_y]          
     jmp .check_walls
 
 .check_walls_pop:
@@ -554,6 +576,14 @@ move_ball:
     cmp rcx, rdx
     jg .done
     
+    ; Aquí es donde añadimos la lógica del sticky power-up
+    cmp qword [has_sticky], 1
+    jne .regular_bounce
+    mov qword [ball_stuck], 1
+    mov qword [game_started], 0
+    jmp .done
+
+.regular_bounce:
     neg byte [ball_dir_y]
     jmp .done
 
@@ -580,6 +610,21 @@ move_ball:
     call reset_positions
     mov qword [ball_active], 1
     mov qword [active_balls_count], 1
+    jmp .done
+
+.follow_paddle:
+    ; Si la bola está pegada o el juego no ha comenzado, mantener sobre la paleta
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [ball_y_pos], rax
+    dec qword [ball_y_pos]
+    
+    mov rax, rdx
+    add rax, 1
+    mov [ball_x_pos], rax
 
 .done:
     ret
@@ -631,7 +676,7 @@ move_pallet:
         inc r8
         mov [pallet_position], r8
     .end:
-    ret
+        ret
 
 ; Funcion: Dibujar bloques
 draw_blocks_m:
@@ -892,7 +937,7 @@ print_game_info:
 
 ; Función compartida para manejar la destrucción de bloques y spawn de power-ups
 handle_block_destruction:
-    ; rax debe contener el índice del bloque
+     ; rax debe contener el índice del bloque
     mov byte [blocks_state + rax], 0   ; Destruir el bloque
     add qword [score], 1               ; Incrementar score
     inc qword [blocks_destroyed]       ; Incrementar contador de bloques destruidos
@@ -903,43 +948,48 @@ handle_block_destruction:
     cmp qword [powerup_active], 1
     je .no_spawn
     
-    ; Simplificar la lógica de generación de power-up
     ; Generar power-up cada 3 bloques destruidos
     mov rax, [blocks_destroyed]
     mov rcx, 3
     xor rdx, rdx
     div rcx
     test rdx, rdx     
-    
     jnz .no_spawn
     
-    ; Calcular posición del bloque destruido
+    ; Calcular posición del power-up
     mov rax, r10                      
     mov rcx, BLOCKS_PER_ROW
     xor rdx, rdx
-    div rcx                           ; rax = fila, rdx = columna
+    div rcx                           
     
-    ; Calcular posición Y
     add rax, BLOCK_START_ROW
     mov [powerup_y], rax
     
-    ; Calcular posición X
     mov rax, rdx
     mov rcx, BLOCK_WIDTH + BLOCK_SPACING
     mul rcx
-    add rax, 2                        ; Ajustar por el borde
+    add rax, 2                        
     mov [powerup_x], rax
     
-    ; Elegir tipo de power-up aleatoriamente
+    ; Elegir tipo de power-up aleatoriamente (ahora incluye sticky)
     call generate_random
-    and rax, 3                        ; 0-2
-    inc rax                           ; 1-3
+    and rax, 3                        ; 0-3
+    inc rax                           ; 1-4
     mov [powerup_type], rax
     
-    ; Activar el power-up
     mov qword [powerup_active], 1
 
 .no_spawn:
+    ret
+
+; Función para desactivar todos los power-ups
+deactivate_all_powerups:
+    mov qword [has_shooting], 0
+    mov qword [has_sticky], 0
+    mov qword [ball_stuck], 0
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
     ret
 
 ; Función para activar el power-up de disparo
@@ -1163,6 +1213,8 @@ update_powerup:
     add rdx, [pallet_size]
     cmp rcx, rdx
     jg .done
+
+    call deactivate_all_powerups
     
     ; Verificar tipo de power-up
     mov rax, [powerup_type]
@@ -1172,6 +1224,8 @@ update_powerup:
     je .activate_life
     cmp rax, POWER_BALLS
     je .activate_balls
+    cmp rax, POWER_STICKY
+    je .activate_sticky
     jmp .deactivate
 
 .activate_shoot:
@@ -1184,6 +1238,10 @@ update_powerup:
 
 .activate_balls:
     call activate_extra_balls
+    jmp .deactivate
+
+.activate_sticky:
+    mov qword [has_sticky], 1
     jmp .deactivate
 
 .deactivate:
@@ -1240,6 +1298,8 @@ print_powerup:
     je .print_life
     cmp rcx, POWER_BALLS
     je .print_balls
+    cmp rcx, POWER_STICKY          ; Añadir comprobación para power-up sticky
+    je .print_sticky
     jmp .done
 
 .print_shoot:
@@ -1252,6 +1312,10 @@ print_powerup:
 
 .print_balls:
     mov bl, [powerup_balls_char]
+    jmp .draw
+
+.print_sticky:                     ; Añadir sección para imprimir power-up sticky
+    mov bl, [powerup_sticky_char]
 
 .draw:
     mov [rax], bl
@@ -1533,23 +1597,23 @@ move_extra_balls:
 
 _start:
     ; Inicializar variables
-    mov qword [score], 0   ; Inicializar score en 0
-    mov qword [level], 1   ; Inicializar level en 1
-    mov qword [lives], 5   ; Inicializar lives en 5
+    mov qword [score], 0             ; Inicializar score en 0
+    mov qword [level], 1             ; Inicializar level en 1
+    mov qword [lives], 5             ; Inicializar lives en 5
     mov qword [blocks_destroyed], 0
-    mov qword [powerup_active], 0    ; Inicializar estado de power-up
-    mov qword [powerup_type], 0      ; Inicializar tipo de power-up
-    mov qword [active_balls_count], 1  ; Inicializar contador de bolas
+    mov qword [powerup_active], 0    
+    mov qword [powerup_type], 0      
+    mov qword [active_balls_count], 1 
     mov qword [ball2_active], 0
     mov qword [ball3_active], 0
-    mov qword [ball_active], 1  
+    mov qword [ball_active], 1
+    mov qword [game_started], 0      ; Inicializar estado del juego
 
-	call canonical_off
-	print clear, clear_length
-	call start_screen
+    call canonical_off
+    print clear, clear_length
+    call start_screen
 
-
-	.main_loop:
+    .main_loop:
         ; Incrementar contador de la pelota
         inc qword [ball_counter]
         mov rax, [ball_counter]
@@ -1562,49 +1626,68 @@ _start:
         call move_extra_balls
 
     .skip_ball_move:
-        ; Limpiar la posición anterior de la pelota
+        ; Limpiar y actualizar pantalla
         print clear, clear_length
         call clear_board
         call draw_blocks_m
         call print_pallet
         call print_ball
         call print_bullet
-        call print_powerup       ; Asegúrate de que esta línea esté presente
-        call update_powerup      ; Y esta también
+        call print_powerup
+        call update_powerup
         call update_powerup_timer
         print board, board_size
         call print_game_info
 
-		getchar
+        getchar
 
-		cmp rax, 1
-    	jne .done
+        cmp rax, 1
+        jne .done
 
-		mov al,[input_char]
+        mov al,[input_char]
 
-		cmp al, 'a'
-	    je .move_left2
+        cmp al, 'a'
+        je .move_left2
         cmp al, 'd'
-	    je .move_right2
+        je .move_right2
         cmp al, 'q'
         je exit
+        cmp al, ' '                   ; Check for space key
+        je .start_game
+        jmp .done
+
+    .start_game:
+        cmp qword [ball_stuck], 1
+        je .release_ball
+        cmp qword [game_started], 0
+        jne .done
+        mov qword [game_started], 1
+        mov qword [ball_dir_y], -1
+        mov qword [ball_dir_x], 1
+        jmp .done
+
+    .release_ball:
+        mov qword [ball_stuck], 0
+        mov qword [game_started], 1
+        mov qword [ball_dir_y], -1
+        mov qword [ball_dir_x], 1
         jmp .done
 
     .move_left2:
-	    mov rdi, left_direction
-		call move_pallet
-	    jmp .done
+        mov rdi, left_direction
+        call move_pallet
+        jmp .done
 
-	.move_right2:
-		mov rdi, right_direction
-	    call move_pallet
+    .move_right2:
+        mov rdi, right_direction
+        call move_pallet
 
-	.done:
-        call update_bullet       ; Actualizar posición de la bala
-        call update_powerup      ; Actualizar power-up cayendo
-        call update_powerup_timer ; Actualizar temporizador del power-up
-		sleeptime
-    	jmp .main_loop
+    .done:
+        call update_bullet
+        call update_powerup
+        call update_powerup_timer
+        sleeptime
+        jmp .main_loop
 		
 
 start_screen:
