@@ -308,16 +308,12 @@ section .data
     bullet_y dq 0            ; Variable temporal para colisiones
     bullet_active dq 0       ; Variable temporal para colisiones
     powerup_spawn_rate dq 20   ; Probabilidad de spawn de power-up (ajustar según necesidad)
-    powerup_duration dq 2500   ; Duración del power-up (5 segundos: 2500 ciclos * 2ms = 5000ms)
-    powerup_timer dq 0         ; Temporizador para el power-up actual
     powerup_x dq 0            ; Posición X del power-up cayendo
     powerup_y dq 0            ; Posición Y del power-up cayendo
     powerup_active dq 0        ; Si hay un power-up cayendo
     powerup_char db 'S'       ; Carácter para el power-up de disparo
     powerup_life_char db 'L'  ; Carácter para el power-up de vida extra
     powerup_type dq 0         ; 0 = ninguno, 1 = disparo, 2 = vida extra
-    auto_shoot_timer dq 0      ; Temporizador para el disparo automático
-    auto_shoot_rate dq 20      ; Frecuencia de disparo automático
     blocks_destroyed dq 0      ; Contador de bloques destruidos
     blocks_for_powerup dq 3    ; Número de bloques que hay que destruir para que aparezca un power-up
     random_seed dq 12345      ; Semilla para generación de números aleatorios
@@ -985,6 +981,8 @@ handle_block_destruction:
 ; Función para desactivar todos los power-ups
 deactivate_all_powerups:
     mov qword [has_shooting], 0
+    mov qword [bullet_active_left], 0
+    mov qword [bullet_active_right], 0
     mov qword [has_sticky], 0
     mov qword [ball_stuck], 0
     mov qword [ball2_active], 0
@@ -995,36 +993,6 @@ deactivate_all_powerups:
 ; Función para activar el power-up de disparo
 activate_shooting:
     mov qword [has_shooting], 1
-    mov rax, [powerup_duration]    ; Primero movemos el valor a un registro
-    mov qword [powerup_timer], rax ; Luego lo movemos del registro a la memoria
-    ret
-
-; Función para actualizar el temporizador del power-up y el disparo automático
-update_powerup_timer:
-    ; Actualizar el temporizador del power-up
-    cmp qword [powerup_timer], 0
-    je .check_auto_shoot
-    dec qword [powerup_timer]
-    jnz .check_auto_shoot
-    mov qword [has_shooting], 0    ; Desactivar power-up cuando el tiempo se acaba
-    jmp .done
-
-.check_auto_shoot:
-    ; Si no tenemos el power-up activo, no disparar
-    cmp qword [has_shooting], 0
-    je .done
-
-    ; Incrementar el temporizador de disparo automático
-    inc qword [auto_shoot_timer]
-    mov rax, [auto_shoot_timer]
-    cmp rax, [auto_shoot_rate]
-    jl .done
-
-    ; Resetear el temporizador y disparar
-    mov qword [auto_shoot_timer], 0
-    call shoot_bullet
-
-.done:
     ret
 
 ; Función para disparar las balas
@@ -1170,7 +1138,26 @@ check_bullet_collision:
     call handle_block_destruction   ; Manejar la destrucción del bloque
     pop rax
     
-    mov qword [bullet_active], 0   ; Desactivar la bala
+    ; Desactivar la bala actual
+    mov qword [bullet_active], 0    ; Este es el indicador temporal que afecta a la bala actual
+    
+    ; Determinar cuál bala fue y desactivarla específicamente
+    mov rax, [bullet_x]
+    mov rbx, [bullet_x_left]
+    cmp rax, rbx
+    je .deactivate_left
+    
+    mov rbx, [bullet_x_right]
+    cmp rax, rbx
+    je .deactivate_right
+    jmp .no_collision
+
+.deactivate_left:
+    mov qword [bullet_active_left], 0
+    jmp .no_collision
+
+.deactivate_right:
+    mov qword [bullet_active_right], 0
     
 .no_collision:
     pop rdx
@@ -1635,7 +1622,6 @@ _start:
         call print_bullet
         call print_powerup
         call update_powerup
-        call update_powerup_timer
         print board, board_size
         call print_game_info
 
@@ -1653,12 +1639,15 @@ _start:
         cmp al, 'q'
         je exit
         cmp al, ' '                   ; Check for space key
-        je .start_game
+        je .handle_space
         jmp .done
 
-    .start_game:
+    .handle_space:
         cmp qword [ball_stuck], 1
         je .release_ball
+        ; Si tenemos el power-up de disparo, disparar
+        cmp qword [has_shooting], 1
+        je .shoot_bullets
         cmp qword [game_started], 0
         jne .done
         mov qword [game_started], 1
@@ -1673,6 +1662,10 @@ _start:
         mov qword [ball_dir_x], 1
         jmp .done
 
+    .shoot_bullets:
+        call shoot_bullet
+        jmp .done
+
     .move_left2:
         mov rdi, left_direction
         call move_pallet
@@ -1685,7 +1678,6 @@ _start:
     .done:
         call update_bullet
         call update_powerup
-        call update_powerup_timer
         sleeptime
         jmp .main_loop
 		
