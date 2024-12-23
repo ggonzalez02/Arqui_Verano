@@ -29,6 +29,7 @@ POWER_ENLARGE equ 5
 POWER_SLOW equ 6
 POWER_BREAK equ 7        ; Tipo de power-up de break
 
+   
 ;This is regarding the sleep time
 timespec:
     tv_sec  dq 0
@@ -355,6 +356,12 @@ section .data
     ; Ajustar la velocidad de caída de power-ups
     powerup_fall_rate dq 2000
 
+    level_complete db 0          ; Flag para indicar si el nivel está completo
+    total_blocks dq 78           ; Bloques totales en el nivel actual
+    blocks_left dq 78            ; Bloques restantes en el nivel actual
+    max_level dq 5               ; Número máximo de niveles
+    blocks_increment dq 39       ; Incremento de bloques por nivellevel_complete db 0          ; Flag para indicar si el nivel está completo
+    
 section .text
 
 generate_random:
@@ -1003,9 +1010,14 @@ handle_block_destruction:
     mov byte [blocks_state + rax], 0   ; Destruir el bloque
     add qword [score], 1               ; Incrementar score
     inc qword [blocks_destroyed]       ; Incrementar contador de bloques destruidos
+    ; Decrementar bloques restantes de forma segura
+    mov rbx, [blocks_left]
+    test rbx, rbx            ; Verificar que no sea 0
+    jz .continue_powerup
+    dec qword [blocks_left]  ; Decrementar si no es 0
 
+.continue_powerup:
     mov r10, rax                       ; Guardar el índice del bloque
-
     ; Solo generar power-up si no hay uno activo
     cmp qword [powerup_active], 1
     je .no_spawn
@@ -1714,6 +1726,43 @@ move_extra_balls:
 .done:
     ret
 
+check_level_complete:
+    push rax
+    push rbx
+
+    ; Verificar si quedan bloques
+    mov rax, [blocks_left]
+    test rax, rax            ; Comprueba si blocks_left = 0
+    jnz .not_complete
+
+    ; Incrementar nivel
+    inc qword [level]
+    mov rax, [level]
+    cmp rax, 5              ; Verificar si llegamos al nivel máximo
+    jg exit
+
+    ; Preparar siguiente nivel
+    mov rax, [blocks_increment]
+    add [total_blocks], rax     ; Aumentar el número total de bloques
+    mov rax, [total_blocks]
+    mov [blocks_left], rax      ; Reiniciar contador de bloques restantes
+
+    ; Reinicializar los bloques
+    mov rcx, 78                 ; Número total de bloques
+    mov rdi, blocks_state
+    mov al, 1
+    rep stosb                   ; Llenar con 1's
+
+    ; Reiniciar estado del juego
+    call reset_positions
+    call deactivate_all_powerups
+    mov byte [game_started], 0
+
+.not_complete:
+    pop rbx
+    pop rax
+    ret
+
 _start:
     ; Inicializar variables
     mov qword [score], 0             ; Inicializar score en 0
@@ -1727,6 +1776,8 @@ _start:
     mov qword [ball3_active], 0
     mov qword [ball_active], 1
     mov qword [game_started], 0      ; Inicializar estado del juego
+    mov qword [total_blocks], 78     ; Inicializar bloques totales
+    mov qword [blocks_left], 78      ; Inicializar bloques restantes
 
     call canonical_off
     print clear, clear_length
@@ -1743,6 +1794,7 @@ _start:
         mov qword [ball_counter], 0
         call move_ball
         call move_extra_balls
+        call check_level_complete
 
     .skip_ball_move:
         ; Limpiar y actualizar pantalla
