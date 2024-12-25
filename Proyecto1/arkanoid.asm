@@ -29,7 +29,7 @@ POWER_ENLARGE equ 5
 POWER_SLOW equ 6
 POWER_BREAK equ 7        ; Tipo de power-up de break
 
-   
+
 ;This is regarding the sleep time
 timespec:
     tv_sec  dq 0
@@ -264,18 +264,164 @@ section .data
     ball_counter dq 0        ; Contador actual
     ball_move dq 100          ; Límite para mover la pelota (ajustar este valor para cambiar la velocidad)
 
-    block_shape db "####"    ; Forma del bloque
+    ; Definición de tipos de bloques
+    BLOCK_GREEN     equ 'G'
+    BLOCK_PINK      equ 'I'
+    BLOCK_BLUE      equ 'U'
+    BLOCK_YELLOW    equ 'Y'
+    BLOCK_RED       equ 'R'
+    BLOCK_WHITE     equ 'W'
+    BLOCK_ORANGE    equ 'O'
+    BLOCK_LIGHTBLUE equ 'H'
+    BLOCK_GRAY      equ 'A'
+    BLOCK_GOLD      equ '#'
+
+    ; Patrones de caracteres para cada tipo de bloque
+    block_pattern_green:     db "GGGG", 0    ; Verde (80 pts)
+    block_pattern_pink:      db "IIII", 0    ; Rosa (110 pts)
+    block_pattern_blue:      db "UUUU", 0    ; Azul (100 pts)
+    block_pattern_yellow:    db "YYYY", 0    ; Amarillo (120 pts)
+    block_pattern_red:       db "RRRR", 0    ; Rojo (90 pts)
+    block_pattern_white:     db "WWWW", 0    ; Blanco (50 pts)
+    block_pattern_orange:    db "OOOO", 0    ; Naranja (60 pts)
+    block_pattern_lightblue: db "HHHH", 0    ; Azul claro (70 pts)
+    block_pattern_gray:      db "AAAA", 0    ; Gris (50 pts, 2 golpes)
+    block_pattern_gold:      db "####", 0    ; Dorado (indestructible)
     block_empty db "    "    ; Espacio vacío del mismo ancho que un bloque
 
+    ; Puntuaciones para cada tipo de bloque
+    block_scores:
+        db 80   ; BLOCK_GREEN (G)
+        db 110  ; BLOCK_PINK (I)
+        db 100  ; BLOCK_BLUE (U)
+        db 120  ; BLOCK_YELLOW (Y)
+        db 90   ; BLOCK_RED (R)
+        db 50   ; BLOCK_WHITE (W)
+        db 60   ; BLOCK_ORANGE (O)
+        db 70   ; BLOCK_LIGHTBLUE (H)
+        db 50   ; BLOCK_GRAY (A)
+        db 0    ; BLOCK_GOLD (#)
+
+     ; Array con el número de bloques por nivel
+    blocks_per_level:
+        dq 78    ; Nivel 1
+        dq 91    ; Nivel 2
+        dq 64    ; Nivel 3 (no se cuentan los bloques dorados)
+        dq 140   ; Nivel 4
+        dq 98    ; Nivel 5
+
+    ; Patrones de niveles (13x6 bloques por nivel)
+    level1_pattern:
+        db 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A'
+        db 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R'
+        db 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y', 'Y'
+        db 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U'
+        db 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I'
+        db 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+
+    level2_pattern:
+        db 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', 'Y', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', 'Y', 'W', ' ', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', 'Y', 'W', 'O', ' ', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', 'Y', 'W', 'O', 'H', ' ', ' '
+        db 'W', 'O', 'H', 'G', 'R', 'U', 'I', 'Y', 'W', 'O', 'H', 'G', ' '
+        db 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'R'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+
+
+    level3_pattern:
+        db 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G', 'G'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'W', 'W', 'W', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', 'W', 'W', 'W'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I', 'I'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'U', 'U', 'U', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', 'H', 'H', 'H'
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+
+
+    level4_pattern:
+        db ' ', 'O', 'H', 'G', 'A', 'U', ' ', 'Y', 'W', 'O', 'H', 'G', ' '
+        db ' ', 'H', 'G', 'A', 'U', 'I', ' ', 'W', 'O', 'H', 'G', 'A', ' '
+        db ' ', 'G', 'A', 'U', 'I', 'Y', ' ', 'O', 'H', 'G', 'A', 'U', ' '
+        db ' ', 'A', 'U', 'I', 'Y', 'W', ' ', 'H', 'G', 'A', 'U', 'I', ' '
+        db ' ', 'U', 'I', 'Y', 'W', 'O', ' ', 'G', 'A', 'U', 'I', 'Y', ' '
+        db ' ', 'I', 'Y', 'W', 'O', 'H', ' ', 'A', 'U', 'I', 'Y', 'W', ' '
+        db ' ', 'Y', 'W', 'O', 'H', 'G', ' ', 'U', 'I', 'Y', 'W', 'O', ' '
+        db ' ', 'W', 'O', 'H', 'G', 'A', ' ', 'I', 'Y', 'W', 'O', 'H', ' '
+        db ' ', 'O', 'H', 'G', 'A', 'U', ' ', 'Y', 'W', 'O', 'H', 'G', ' '
+        db ' ', 'H', 'G', 'A', 'U', 'I', ' ', 'W', 'O', 'H', 'G', 'A', ' '
+        db ' ', 'G', 'A', 'U', 'I', 'Y', ' ', 'O', 'H', 'G', 'A', 'U', ' '
+        db ' ', 'A', 'U', 'I', 'Y', 'W', ' ', 'H', 'G', 'A', 'U', 'I', ' '
+        db ' ', 'U', 'I', 'Y', 'W', 'O', ' ', 'G', 'A', 'U', 'I', 'Y', ' '
+        db ' ', 'I', 'Y', 'W', 'O', 'H', ' ', 'A', 'U', 'I', 'Y', 'W', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '
+
+    level5_pattern:
+        db ' ', ' ', ' ', 'Y', ' ', ' ', ' ', ' ', ' ', 'Y', ' ', ' ', ' '
+        db ' ', ' ', ' ', 'Y', ' ', ' ', ' ', ' ', ' ', 'Y', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', 'Y', ' ', ' ', ' ', 'Y', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', 'Y', ' ', ' ', ' ', 'Y', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' ', ' ', ' '
+        db ' ', ' ', ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' ', ' ', ' '
+        db ' ', ' ', 'A', 'A', 'R', 'A', 'A', 'A', 'R', 'A', ' ', ' ', ' '
+        db ' ', ' ', 'A', 'A', 'R', 'A', 'A', 'A', 'R', 'A', 'A', ' ', ' '
+        db ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' '
+        db ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' '
+        db ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' '
+        db ' ', 'A', ' ', 'A', 'A', 'A', 'A', 'A', 'A', 'A', ' ', 'A', ' '
+        db ' ', 'A', ' ', 'A', ' ', ' ', ' ', ' ', ' ', 'A', ' ', 'A', ' '
+        db ' ', 'A', ' ', 'A', ' ', ' ', ' ', ' ', ' ', 'A', ' ', 'A', ' '
+        db ' ', ' ', ' ', ' ', 'A', 'A', ' ', 'A', 'A', ' ', ' ', ' ', ' '
+        db ' ', ' ', ' ', ' ', 'A', 'A', ' ', 'A', 'A', ' ', ' ', ' ', ' '
+
+
+    ; Array de punteros a los patrones de nivel
+    level_patterns:
+        dq level1_pattern
+        dq level2_pattern
+        dq level3_pattern
+        dq level4_pattern
+        dq level5_pattern
+
     ; Estado de los bloques (1=presente, 0=destruido)
-    blocks_state: times (13 * 6) db 1  ; 13 columnas x 6 filas
+    blocks_state: times (13 * 16) db 1  ; 13 columnas x 6 filas
     board_buffer: times (row_cells * (column_cells + 2)) db ' '  ; Buffer para el tablero
 
 
     ; Añadir constantes para los bloques
     BLOCK_START_ROW equ 5      ; Fila donde empiezan los bloques
-    BLOCK_ROWS equ 6           ; Número de filas de bloques
+    BLOCK_ROWS equ 16           ; Número de filas de bloques
     BLOCKS_PER_ROW equ 13      ; Bloques por fila
+    PATTERN_SIZE equ BLOCK_ROWS * BLOCKS_PER_ROW
 
     ; Posiciones iniciales para reiniciar
     initial_ball_x dq 34    ; Posición X inicial de la bola
@@ -354,14 +500,15 @@ section .data
     ball3_active dq 0
 
     ; Ajustar la velocidad de caída de power-ups
-    powerup_fall_rate dq 2000
+    powerup_fall_rate dq 400
+    powerup_counter dq 0
 
     level_complete db 0          ; Flag para indicar si el nivel está completo
     total_blocks dq 78           ; Bloques totales en el nivel actual
     blocks_left dq 78            ; Bloques restantes en el nivel actual
     max_level dq 5               ; Número máximo de niveles
     blocks_increment dq 39       ; Incremento de bloques por nivellevel_complete db 0          ; Flag para indicar si el nivel está completo
-    
+
 section .text
 
 generate_random:
@@ -484,25 +631,30 @@ reset_positions:
     ; Reiniciar contador
     mov qword [ball_counter], 0
 
+    ; Reiniciar posiciones de bolas extra (aunque estén inactivas)
+    mov rax, [ball_x_pos]
+    mov [ball2_x_pos], rax
+    mov [ball3_x_pos], rax
+    mov rax, [ball_y_pos]
+    mov [ball2_y_pos], rax
+    mov [ball3_y_pos], rax
+
     pop rcx
     pop rbx
     ret
 
-; Modificar la función move_ball para incluir movimiento y colisiones
 ; Función para mover la pelota y manejar colisiones
-; Función para mover la pelota y manejar todas las colisiones
 move_ball:
     cmp qword [ball_stuck], 1
     je .follow_paddle
-    ; Verificar si el juego ha comenzado
+    
     cmp qword [game_started], 0
     je .follow_paddle
 
-    ; Verificar si la bola está activa
     cmp qword [ball_active], 0
     je .done
 
-    ; Comprobar colisión con bloques primero
+    ; Comprobar colisión con bloques
     movzx rax, byte [ball_y_pos]
     sub eax, BLOCK_START_ROW
     cmp rax, 0
@@ -522,23 +674,40 @@ move_ball:
     cmp eax, BLOCKS_PER_ROW
     jge .check_walls_pop
 
+    ; Calcular índice final del bloque
     pop rbx
     push rax
-
     mov rax, rbx
     mov rcx, BLOCKS_PER_ROW
     mul rcx
     pop rcx
     add rax, rcx
 
-    ; Verificar si hay un bloque y actualizarlo
-    cmp byte [blocks_state + rax], 1
-    jne .check_walls
+    ; Verificar si hay un bloque
+    cmp byte [blocks_state + rax], 0
+    je .check_walls
 
+    ; Obtener tipo de bloque del patrón
+    mov rbx, [level]
+    dec rbx
+    imul rbx, PATTERN_SIZE
+    add rbx, [level_patterns]
+    movzx rbx, byte [rbx + rax]    ; Obtener el carácter del patrón
+
+    ; Verificar si es espacio en blanco
+    cmp bl, ' '
+    je .check_walls
+    
+    ; Si es un bloque dorado, solo rebotar
+    cmp bl, '#'
+    je .bounce_only
+
+    ; Si no es dorado, destruirlo
     push rax
     call handle_block_destruction
     pop rax
 
+.bounce_only:
     neg byte [ball_dir_y]
     jmp .check_walls
 
@@ -546,7 +715,7 @@ move_ball:
     pop rax
 
 .check_walls:
-    ; Mover en X
+    ; El resto de la función permanece igual
     movzx rax, byte [ball_x_pos]
     movsx rbx, byte [ball_dir_x]
     add rax, rbx
@@ -594,9 +763,9 @@ move_ball:
     cmp rcx, rdx
     jg .done
 
-    ; Aquí es donde añadimos la lógica del sticky power-up
     cmp qword [has_catch], 1
     jne .regular_bounce
+
     mov qword [ball_stuck], 1
     mov qword [game_started], 0
     jmp .done
@@ -614,47 +783,51 @@ move_ball:
     jmp .done
 
 .ball_lost:
-    ; Si el power-up de break está activo y la bola está en la última fila
-    cmp qword [has_break], 1
-    jne .normal_ball_lost
-
-    ; Verificar si la bola está en la posición de la abertura
-    movzx rcx, byte [ball_x_pos]
-    mov rax, [break_position]
-    cmp rcx, rax
-    jl .normal_ball_lost
-
-    add rax, [break_width]
-    cmp rcx, rax
-    jg .normal_ball_lost
-
-    ; Si llegamos aquí, la bola salió por la abertura
-    jmp exit               ; Terminar el juego
-
-.normal_ball_lost:
     mov qword [ball_active], 0
     dec qword [active_balls_count]
-
-    cmp qword [active_balls_count], 0
-    jg .done
-
     dec qword [lives]
     mov rax, [lives]
     test rax, rax
     jz exit
-
     call reset_positions
     mov qword [ball_active], 1
     mov qword [active_balls_count], 1
     jmp .done
 
+.convert_ball2_to_main:
+    ; Convertir ball2 en la bola principal
+    mov qword [ball2_active], 0
+    mov qword [ball_active], 1
+    mov rax, [ball2_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball2_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball2_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball2_dir_y]
+    mov [ball_dir_y], rax
+    jmp .done
+
+.convert_ball3_to_main:
+    ; Convertir ball3 en la bola principal
+    mov qword [ball3_active], 0
+    mov qword [ball_active], 1
+    mov rax, [ball3_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball3_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball3_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball3_dir_y]
+    mov [ball_dir_y], rax
+    jmp .done
+
 .follow_paddle:
-    ; Si la bola está pegada o el juego no ha comenzado, mantener sobre la paleta
     mov rax, [pallet_position]
     sub rax, board
     mov rbx, column_cells + 2
     xor rdx, rdx
-    div rbx                          ; rax = fila, rdx = columna
+    div rbx
 
     mov [ball_y_pos], rax
     dec qword [ball_y_pos]
@@ -669,31 +842,41 @@ move_ball:
 ;	Function: print_pallet
 ; This function moves the pallet in the game
 ; Arguments: none
-;
 ; Return;
 ;	void
 print_pallet:
-	mov r8, [pallet_position]
-	mov rcx, [pallet_size]
-	.write_pallet:
-		mov byte [r8], char_equal
-		inc r8
-		dec rcx
-		jnz .write_pallet
-    ;  Si el power-up de break está activo, crear la abertura
+    ; Primero dibujamos la paleta normal
+    mov r8, [pallet_position]
+    mov rcx, [pallet_size]
+    .write_pallet:
+        mov byte [r8], char_equal
+        inc r8
+        dec rcx
+        jnz .write_pallet
+
+    ; Si el power-up de break está activo, crear la abertura en el borde
     cmp qword [has_break], 1
     jne .done
 
-    ; Calcular la fila actual de la paleta
+    ; Calcular la posición del borde derecho
     mov rax, [pallet_position]
     sub rax, board
     mov rbx, column_cells + 2
+    xor rdx, rdx
     div rbx                  ; rax = fila actual
-    mul rbx                 ; rax = fila * ancho
-    add rax, column_cells   ; añadir el offset para llegar a la última columna
-    
-    ; Crear la abertura
+    mul rbx                  ; rax = fila * ancho
+    add rax, column_cells + 1  ; añadir el offset para llegar al borde derecho
+
+    ; Crear la abertura en el borde
     mov byte [board + rax], ' '  ; Reemplazar la X con un espacio
+
+    ; Actualizar la posición de la abertura
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [break_position], rdx    ; Guardar la posición X actual
 
 .done:
     ret
@@ -710,9 +893,8 @@ move_pallet:
     jne .move_right
     .move_left:
         mov r8, [pallet_position]
-        ; Verificar si hay una X en la siguiente posición a la izquierda
         cmp byte [r8-1], 'X'
-        je .end                ; Si hay una X, no mover
+        je .end
         mov r9, [pallet_size]
         mov byte [r8 + r9 - 1], char_space
         dec r8
@@ -721,101 +903,128 @@ move_pallet:
     .move_right:
         mov r8, [pallet_position]
         mov r9, [pallet_size]
+
         cmp qword [has_break], 1
         je .allow_movement
+
         cmp byte [r8+r9], 'X'
         je .end
+
     .allow_movement:
         mov byte [r8], char_space
         inc r8
         mov [pallet_position], r8
-        
-        ; Si tenemos break, verificar si salimos completamente
+
         cmp qword [has_break], 1
         jne .end
-        
-        ; Calcular si la paleta está completamente fuera
-        mov rax, r8
-        sub rax, board
-        mov rbx, column_cells + 2
-        xor rdx, rdx
-        div rbx                  ; rax = fila, rdx = columna
-        add rdx, r9              ; añadir el tamaño de la paleta
-        cmp rdx, column_cells + 1
-        jge exit                 ; Si la paleta está completamente fuera, terminar
-    .end:
-        ret            
 
+        mov rax, [pallet_position]
+        add rax, [pallet_size]
+        sub rax, board
+        mov rcx, column_cells + 2
+        xor rdx, rdx
+        div rcx
+
+        cmp rdx, column_cells
+        jl .end
+
+        ; Si la paleta sale completamente, pasar de nivel
+        add qword [score], 10000
+        push qword [score]
+        inc qword [level]
+        mov rax, [level]
+        cmp rax, [max_level]
+        jg exit
+
+        call init_level
+        call reset_positions
+        call deactivate_all_powerups
+        pop qword [score]
+
+    .end:
+        ret
 
 ; Funcion: Dibujar bloques
 draw_blocks_m:
     push rbx
     push rdx
 
-    mov r8, board
-    mov rax, column_cells + 2    ; +2 por los saltos de línea
-    mov rbx, BLOCK_START_ROW
+    ; Obtener el patrón del nivel actual
+    mov rbx, [level]
+    dec rbx
+    mov rax, PATTERN_SIZE      ; Usar el nuevo tamaño del patrón
     mul rbx
-    add r8, rax                  ; r8 ahora apunta a la fila inicial de bloques
-    add r8, 1                    ; Ajustar por el borde izquierdo
+    mov rbx, [level_patterns]
+    add rbx, rax
 
-    mov r10, BLOCK_ROWS         ; Contador de filas (6)
+    mov r8, board
+    mov rax, column_cells + 2
+    mov rcx, BLOCK_START_ROW
+    mul rcx
+    add r8, rax
+    add r8, 1
+
+    mov r10, BLOCK_ROWS         ; Ahora usará 16 filas
+    xor r12, r12                ; Índice global para los bloques
 
 .loop_rows:
-    cmp r10, 0
-    je .blocks_done
+    test r10, r10
+    jz .blocks_done
 
-    mov r11, BLOCKS_PER_ROW     ; Contador de columnas (13)
-    push r8                     ; Guardar posición inicial de la fila
+    mov r11, BLOCKS_PER_ROW
+    push r8
 
 .loop_columns:
-    cmp r11, 0
-    je .next_row
+    test r11, r11
+    jz .next_row
 
-    ; Calcular índice del bloque
-    mov rax, BLOCK_ROWS
-    sub rax, r10               ; Obtener fila actual (0-5)
-    mov rbx, BLOCKS_PER_ROW
-    mul rbx                    ; rax = fila * bloques_por_fila
-    add rax, BLOCKS_PER_ROW
-    sub rax, r11              ; Añadir columna actual
+    cmp r12, PATTERN_SIZE
+    jge .draw_empty
 
-    ; Verificar si el bloque existe
-    cmp byte [blocks_state + rax], 1
-    jne .draw_empty
+    ; Obtener el tipo de bloque
+    movzx rax, byte [rbx + r12]
 
-    ; Dibujar bloque ####
+    ; Obtener el tipo de bloque del patrón
+    ;mov al, [rbx + r12]
+
+    ; Si es espacio o el bloque no existe, dibujar espacio
+    cmp al, ' '
+    je .draw_empty
+    cmp byte [blocks_state + r12], 0
+    je .draw_empty
+
+    ; Dibujar el bloque
     mov rcx, BLOCK_WIDTH
-.draw_block_chars:
-    mov byte [r8], '#'
+.draw_block_loop:
+    mov [r8], al
     inc r8
     dec rcx
-    jnz .draw_block_chars
+    jnz .draw_block_loop
     jmp .after_block
 
 .draw_empty:
-    ; Dibujar espacio vacío
     mov rcx, BLOCK_WIDTH
-.draw_empty_chars:
+.draw_empty_loop:
     mov byte [r8], ' '
     inc r8
     dec rcx
-    jnz .draw_empty_chars
+    jnz .draw_empty_loop
 
 .after_block:
-    ; Añadir espacio entre bloques
-    cmp r11, 1                ; Si no es el último bloque
+    ; Añadir espacio entre bloques si no es el último bloque
+    cmp r11, 1
     je .skip_space
-    mov byte [r8], ' '        ; Añadir espacio
+    mov byte [r8], ' '
     inc r8
 
 .skip_space:
+    inc r12
     dec r11
     jmp .loop_columns
 
 .next_row:
-    pop r8                    ; Recuperar inicio de la fila
-    add r8, column_cells + 2  ; Avanzar a la siguiente fila
+    pop r8
+    add r8, column_cells + 2
     dec r10
     jmp .loop_rows
 
@@ -831,44 +1040,142 @@ check_block_collision:
 
     ; Obtener posición Y de la pelota
     mov rax, [ball_y_pos]
-    sub rax, BLOCK_START_ROW
+    sub eax, BLOCK_START_ROW
     cmp rax, 0
     jl .no_collision
     cmp rax, BLOCK_ROWS
     jge .no_collision
 
-    ; Calcular índice del bloque
-    mov rbx, BLOCKS_PER_ROW
-    mul rbx                    ; rax = fila * bloques_por_fila
+    push rax
+    movzx rcx, byte [ball_x_pos]
+    sub ecx, 1
+    mov eax, ecx
+    xor edx, edx
+    mov ebx, BLOCK_WIDTH + 1
+    div ebx
 
-    ; Obtener posición X y calcular columna
-    mov rcx, [ball_x_pos]
-    sub rcx, 1                ; Ajustar por el borde izquierdo
-    mov rax, rcx
-    mov rbx, BLOCK_WIDTH + BLOCK_SPACING
-    xor rdx, rdx
-    div rbx                   ; Dividir por (ancho_bloque + espacio)
+    ; Verificar si la columna es válida
+    cmp eax, BLOCKS_PER_ROW
+    jge .pop_and_no_collision
 
-    cmp rax, BLOCKS_PER_ROW
-    jge .no_collision
+    pop rbx
+    push rax
 
-    ; Calcular índice final del bloque
-    mov rbx, [ball_y_pos]
-    sub rbx, BLOCK_START_ROW
-    imul rbx, BLOCKS_PER_ROW
-    add rax, rbx
+    mov rax, rbx
+    mov rcx, BLOCKS_PER_ROW
+    mul rcx
+    pop rcx
+    add rax, rcx
 
-    ; Verificar si hay un bloque
-    cmp byte [blocks_state + rax], 1
-    jne .no_collision
+    ; Obtener el tipo de bloque del patrón actual
+    push rax
+    mov rbx, [level]
+    dec rbx
+    mov rcx, PATTERN_SIZE
+    mul rcx
+    mov rcx, [level_patterns]
+    add rcx, rax
+    pop rax
 
-    ; Destruir el bloque
-    mov byte [blocks_state + rax], 0
+    ; Verificar el estado del bloque
+    cmp byte [blocks_state + rax], 0
+    je .no_collision
 
-    ; Hacer que la pelota rebote
+    ; Si es un bloque dorado (estado 2), solo rebotar
+    cmp byte [blocks_state + rax], 2
+    je .bounce_only
+
+    ; Si es un bloque normal, destruirlo
+    push rax
+    call handle_block_destruction
+    pop rax
+
+.bounce_only:
     neg qword [ball_dir_y]
+    jmp .no_collision
+
+.pop_and_no_collision:
+    pop rax
 
 .no_collision:
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; Función para obtener el puntaje de un bloque
+get_block_score:
+    ; Entrada: AL = tipo de bloque
+    ; Salida: AL = puntaje
+    push rbx
+    push rcx
+    push rdx
+
+    ; Guardar el tipo de bloque
+    mov cl, al
+
+    ; Puntajes por defecto
+    mov al, 0      ; Valor por defecto
+
+    cmp cl, 'G'    ; Verde
+    jne .check_pink
+    mov al, 80
+    jmp .done
+
+.check_pink:
+    cmp cl, 'I'    ; Rosa
+    jne .check_blue
+    mov al, 110
+    jmp .done
+
+.check_blue:
+    cmp cl, 'U'    ; Azul
+    jne .check_yellow
+    mov al, 100
+    jmp .done
+
+.check_yellow:
+    cmp cl, 'Y'    ; Amarillo
+    jne .check_red
+    mov al, 120
+    jmp .done
+
+.check_red:
+    cmp cl, 'R'    ; Rojo
+    jne .check_white
+    mov al, 90
+    jmp .done
+
+.check_white:
+    cmp cl, 'W'    ; Blanco
+    jne .check_orange
+    mov al, 50
+    jmp .done
+
+.check_orange:
+    cmp cl, 'O'    ; Naranja
+    jne .check_lightblue
+    mov al, 60
+    jmp .done
+
+.check_lightblue:
+    cmp cl, 'H'    ; Azul claro
+    jne .check_gray
+    mov al, 70
+    jmp .done
+
+.check_gray:
+    cmp cl, 'A'    ; Gris
+    jne .check_gold
+    mov al, 50
+    jmp .done
+
+.check_gold:
+    cmp cl, '#'    ; Dorado
+    jne .done
+    mov al, 0
+
+.done:
     pop rdx
     pop rcx
     pop rbx
@@ -1006,133 +1313,90 @@ print_game_info:
 
 ; Función compartida para manejar la destrucción de bloques y spawn de power-ups
 handle_block_destruction:
-     ; rax debe contener el índice del bloque
-    mov byte [blocks_state + rax], 0   ; Destruir el bloque
-    add qword [score], 1               ; Incrementar score
-    inc qword [blocks_destroyed]       ; Incrementar contador de bloques destruidos
-    ; Decrementar bloques restantes de forma segura
-    mov rbx, [blocks_left]
-    test rbx, rbx            ; Verificar que no sea 0
-    jz .continue_powerup
-    dec qword [blocks_left]  ; Decrementar si no es 0
+    ; rax debe contener el índice del bloque
+    push rbx
+    push rcx
+    push rdx
+    push rax
 
-.continue_powerup:
-    mov r10, rax                       ; Guardar el índice del bloque
-    ; Solo generar power-up si no hay uno activo
-    cmp qword [powerup_active], 1
-    je .no_spawn
+    ; Verificar si el bloque existe
+    cmp byte [blocks_state + rax], 2    ; 2 = bloque dorado
+    je .skip_points
+    cmp byte [blocks_state + rax], 0    ; 0 = ya destruido
+    je .skip_points
 
-    ; Generar power-up cada 3 bloques destruidos
+    ; Obtener el tipo de bloque del patrón del nivel actual
+    mov rbx, [level]
+    dec rbx
+    imul rbx, PATTERN_SIZE
+    mov rcx, [level_patterns]
+    add rcx, rbx
+    add rcx, rax
+    movzx rbx, byte [rcx]
+
+    ; Verificar si es bloque dorado
+    cmp bl, '#'
+    je .skip_points
+
+    ; Marcar el bloque como destruido
+    mov byte [blocks_state + rax], 0
+    dec qword [blocks_left]
+
+    ; Calcular y sumar puntos
+    push rax
+    mov al, bl
+    call get_block_score      ; Esta función devuelve los puntos en al
+    movzx rax, al            ; Extender al a rax
+    add [score], rax         ; Sumar al score total
+    pop rax
+
+    ; Incrementar contador de bloques destruidos
+    inc qword [blocks_destroyed]
+
+    ; Verificar si generar power-up
     mov rax, [blocks_destroyed]
-    mov rcx, 3
+    mov rcx, [blocks_for_powerup]
     xor rdx, rdx
     div rcx
     test rdx, rdx
-    jnz .no_spawn
+    jnz .skip_points
+
+    ; Generar power-up si no hay uno activo
+    cmp qword [powerup_active], 0
+    jne .skip_points
+
+    ; Inicializar power-up
+    mov qword [powerup_active], 1
 
     ; Calcular posición del power-up
-    mov rax, r10
+    pop rax
+    push rax
+    mov rdx, 0
     mov rcx, BLOCKS_PER_ROW
-    xor rdx, rdx
     div rcx
-
     add rax, BLOCK_START_ROW
     mov [powerup_y], rax
 
     mov rax, rdx
-    mov rcx, BLOCK_WIDTH + BLOCK_SPACING
-    mul rcx
+    mov rbx, BLOCK_WIDTH + 1
+    mul rbx
     add rax, 2
     mov [powerup_x], rax
 
-    ; Elegir tipo de power-up aleatoriamente
-.generate_again:
+    ; Generar tipo aleatorio de power-up
     call generate_random
-    and rax, 7              ; 7 es 111 en binario, permite números 0-7
-    cmp rax, 7              ; Si es mayor que 5
-    jg .generate_again      ; generar otro número
-    inc rax                 ; Convierte 0-4 en 1-5                          ; 1-5
-    mov [powerup_type], rax
-
-    mov qword [powerup_active], 1
-
-.no_spawn:
-    ret
-
-; Función para desactivar todos los power-ups
-deactivate_all_powerups:
-    mov qword [has_shooting], 0
-    mov qword [bullet_active_left], 0
-    mov qword [bullet_active_right], 0
-    mov qword [has_catch], 0
-    mov qword [ball_stuck], 0
-    mov qword [ball2_active], 0
-    mov qword [ball3_active], 0
-    mov qword [active_balls_count], 1
-    mov qword [has_enlarge], 0
-    mov rax, [default_pallet_size]  ; Restaurar tamaño normal de la paleta
-    mov [pallet_size], rax
-    mov qword [has_slow], 0           ; Desactivar el power-up de velocidad
-    mov rax, [ball_speed]             ; Restaurar velocidad normal
-    mov [ball_move], rax            ; Restaurar velocidad normal
-    mov qword [has_break], 0
-    ret
-
-; Función para activar el power-up de disparo
-activate_shooting:
-    mov qword [has_shooting], 1
-    ret
-
-; Función para disparar las balas
-shoot_bullet:
-    ; Verificar y disparar bala izquierda
-    cmp qword [bullet_active_left], 1
-    je .check_right
-
-    mov qword [bullet_active_left], 1
-    ; Posicionar la bala en el extremo izquierdo de la paleta
-    mov rax, [pallet_position]
-    sub rax, board
-    mov rbx, column_cells + 2
+    mov rbx, 7
     xor rdx, rdx
     div rbx
-    mov [bullet_y_left], rax           ; Y inicial
+    inc rdx
+    mov [powerup_type], rdx
 
-    mov rax, [pallet_position]
-    sub rax, board
-    mov [bullet_x_left], rax           ; X inicial (borde izquierdo de la paleta)
-    xor rdx, rdx
-    div rbx                            ; Dividir por ancho de línea para ajustar
-    mov [bullet_x_left], rdx           ; Solo mantener el offset dentro de la línea
-
-.check_right:
-    ; Verificar y disparar bala derecha
-    cmp qword [bullet_active_right], 1
-    je .done
-
-    mov qword [bullet_active_right], 1
-    ; Posicionar la bala en el extremo derecho de la paleta
-    mov rax, [pallet_position]
-    sub rax, board
-    mov rbx, column_cells + 2
-    xor rdx, rdx
-    div rbx
-    mov [bullet_y_right], rax          ; Y inicial
-
-    ; Calcular posición X del borde derecho
-    mov rax, [pallet_position]
-    sub rax, board
-    add rax, [pallet_size]            ; Añadir el tamaño de la paleta
-    dec rax                           ; Ajustar para el último carácter
-    mov [bullet_x_right], rax         ; X inicial (borde derecho de la paleta)
-    mov rbx, column_cells + 2
-    xor rdx, rdx
-    div rbx                          ; Dividir por ancho de línea para ajustar
-    mov [bullet_x_right], rdx        ; Solo mantener el offset dentro de la línea
-
-.done:
+.skip_points:
+    pop rax
+    pop rdx
+    pop rcx
+    pop rbx
     ret
-
 ; Función para actualizar la posición de las balas
 update_bullet:
     ; Actualizar bala izquierda
@@ -1253,6 +1517,61 @@ check_bullet_collision:
     pop rbx
     ret
 
+; Función para activar el power-up de disparo
+activate_shooting:
+    mov qword [has_shooting], 1
+    ret
+
+; Función para disparar las balas
+shoot_bullet:
+    ; Verificar y disparar bala izquierda
+    cmp qword [bullet_active_left], 1
+    je .check_right
+
+    mov qword [bullet_active_left], 1
+    ; Posicionar la bala en el extremo izquierdo de la paleta
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [bullet_y_left], rax           ; Y inicial
+
+    mov rax, [pallet_position]
+    sub rax, board
+    mov [bullet_x_left], rax           ; X inicial (borde izquierdo de la paleta)
+    xor rdx, rdx
+    div rbx                            ; Dividir por ancho de línea para ajustar
+    mov [bullet_x_left], rdx           ; Solo mantener el offset dentro de la línea
+
+.check_right:
+    ; Verificar y disparar bala derecha
+    cmp qword [bullet_active_right], 1
+    je .done
+
+    mov qword [bullet_active_right], 1
+    ; Posicionar la bala en el extremo derecho de la paleta
+    mov rax, [pallet_position]
+    sub rax, board
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx
+    mov [bullet_y_right], rax          ; Y inicial
+
+    ; Calcular posición X del borde derecho
+    mov rax, [pallet_position]
+    sub rax, board
+    add rax, [pallet_size]            ; Añadir el tamaño de la paleta
+    dec rax                           ; Ajustar para el último carácter
+    mov [bullet_x_right], rax         ; X inicial (borde derecho de la paleta)
+    mov rbx, column_cells + 2
+    xor rdx, rdx
+    div rbx                          ; Dividir por ancho de línea para ajustar
+    mov [bullet_x_right], rdx        ; Solo mantener el offset dentro de la línea
+
+.done:
+    ret
+
 ; Función para dibujar las balas
 print_bullet:
     ; Dibujar bala izquierda
@@ -1283,93 +1602,167 @@ print_bullet:
 .done:
     ret
 
+; Función para desactivar todos los power-ups
+deactivate_all_powerups:
+    mov qword [active_balls_count], 1
+    mov qword [powerup_active], 0
+    mov qword [powerup_type], 0
+    mov qword [bullet_active_left], 0
+    mov qword [bullet_active_right], 0
+    mov qword [has_shooting], 0
+    mov qword [ball_stuck], 0
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [has_catch], 0
+    mov qword [has_enlarge], 0
+    mov rax, [default_pallet_size]    ; Restaurar tamaño normal de la paleta
+    mov [pallet_size], rax
+    mov qword [has_slow], 0           ; Desactivar el power-up de velocidad
+    mov rax, [ball_speed]             ; Restaurar velocidad normal
+    mov [ball_move], rax              ; Restaurar velocidad normal
+    mov qword [has_break], 0
+    ret
+
+; Función para desactivar el power-up actual
+deactivate_current_powerup:
+    push rax                        ; Guardar rax ya que lo vamos a usar
+
+    ; Verificar y desactivar cada power-up si está activo
+    cmp qword [has_shooting], 1
+    je .disable_shooting
+    cmp qword [has_catch], 1
+    je .disable_catch
+    cmp qword [has_enlarge], 1
+    je .disable_enlarge
+    cmp qword [has_slow], 1
+    je .disable_slow
+    cmp qword [has_break], 1
+    je .disable_break
+    jmp .done
+
+.disable_shooting:
+    mov qword [has_shooting], 0
+    mov qword [bullet_active_left], 0
+    mov qword [bullet_active_right], 0
+    jmp .done
+
+.disable_catch:
+    mov qword [has_catch], 0
+    mov qword [ball_stuck], 0
+    jmp .done
+
+.disable_enlarge:
+    mov qword [has_enlarge], 0
+    mov rax, [default_pallet_size]
+    mov [pallet_size], rax
+    jmp .done
+
+.disable_slow:
+    mov qword [has_slow], 0
+    mov rax, [ball_speed]
+    mov [ball_move], rax
+    jmp .done
+
+.disable_break:
+    mov qword [has_break], 0
+
+.done:
+    pop rax                         ; Restaurar rax
+    ret
+
 ; Función para manejar la caída del power-up
 update_powerup:
-    cmp qword [powerup_active], 0
+    cmp qword [powerup_active], 0    ; Si no hay power-up activo, salir
     je .done
 
-    ; Mover el power-up hacia abajo más lento
-    mov rax, [ball_counter]
-    mov rcx, [powerup_fall_rate]    ; Usar la nueva variable de velocidad
-    xor rdx, rdx
-    div rcx
-    test rdx, rdx
-    jnz .done
+    ; Incrementar contador de caída
+    inc qword [powerup_counter]
+    mov rax, [powerup_counter]
+    cmp rax, [powerup_fall_rate]     ; Comparar con la tasa de caída
+    jl .done                         ; Si no es tiempo de caer, salir
 
-    inc qword [powerup_y]
+    ; Reiniciar contador y mover power-up
+    mov qword [powerup_counter], 0
+    inc qword [powerup_y]            ; Mover power-up hacia abajo
 
     ; Verificar si llegó al fondo
-    cmp qword [powerup_y], row_cells-2
-    jge .deactivate
+    mov rax, [powerup_y]
+    cmp rax, row_cells - 2
+    jge .deactivate_powerup
 
     ; Verificar colisión con la paleta
     mov rax, [powerup_y]
-    cmp rax, 27
+    cmp rax, 27                      ; Fila de la paleta
     jne .done
 
-    mov rcx, [powerup_x]
+    ; Verificar colisión horizontal con la paleta
+    mov rcx, [powerup_x]             ; Posición X del power-up
     mov rdx, [pallet_position]
-    sub rdx, board
-    sub rdx, 27 * (column_cells + 2)
+    sub rdx, board                   ; Obtener el offset de la paleta
+    sub rdx, 27 * (column_cells + 2) ; Ajustar a la posición X real
 
+    ; Comparar con el rango de la paleta
     cmp rcx, rdx
-    jl .done
+    jl .done                         ; Si está a la izquierda, no hay colisión
 
     add rdx, [pallet_size]
     cmp rcx, rdx
-    jg .done
+    jg .done                         ; Si está a la derecha, no hay colisión
 
-    call deactivate_all_powerups
+    ; Desactivar cualquier power-up activo actual
+    call deactivate_current_powerup
 
-    ; Verificar tipo de power-up
+    ; Activar el nuevo power-up según su tipo
     mov rax, [powerup_type]
-    cmp rax, POWER_LASER
-    je .activate_shoot
-    cmp rax, POWER_LIFE
-    je .activate_life
-    cmp rax, POWER_BALLS
-    je .activate_balls
-    cmp rax, POWER_CATCH
-    je .activate_catch
-    cmp rax, POWER_ENLARGE
-    je .activate_enlarge
-    cmp rax, POWER_SLOW
-    je .activate_slow
-    cmp rax, POWER_BREAK
-    je .activate_break
-    jmp .deactivate
-    jmp .deactivate
 
-.activate_shoot:
-    call activate_shooting
-    jmp .deactivate
+    cmp rax, POWER_LASER            ; Power-up de disparo
+    jne .check_life
+    mov qword [has_shooting], 1
+    jmp .deactivate_powerup
 
-.activate_life:
-    call activate_extra_life
-    jmp .deactivate
+.check_life:
+    cmp rax, POWER_LIFE             ; Power-up de vida extra
+    jne .check_balls
+    inc qword [lives]
+    jmp .deactivate_powerup
 
-.activate_balls:
+.check_balls:
+    cmp rax, POWER_BALLS            ; Power-up de bolas extra
+    jne .check_catch
     call activate_extra_balls
-    jmp .deactivate
+    jmp .deactivate_powerup
 
-.activate_catch:
+.check_catch:
+    cmp rax, POWER_CATCH            ; Power-up sticky
+    jne .check_enlarge
     mov qword [has_catch], 1
-    jmp .deactivate
+    jmp .deactivate_powerup
 
-.activate_enlarge:
-    call activate_enlarge_pallet
-    jmp .deactivate
+.check_enlarge:
+    cmp rax, POWER_ENLARGE          ; Power-up de agrandar paleta
+    jne .check_slow
+    mov qword [has_enlarge], 1
+    mov rax, [wide_pallet_size]
+    mov [pallet_size], rax
+    jmp .deactivate_powerup
 
-.activate_slow:
-    call activate_slow_ball
-    jmp .deactivate
+.check_slow:
+    cmp rax, POWER_SLOW             ; Power-up de pelota lenta
+    jne .check_break
+    mov qword [has_slow], 1
+    mov rax, [slow_ball_speed]
+    mov [ball_move], rax
+    jmp .deactivate_powerup
 
-.activate_break:
-    call activate_break
-    jmp .deactivate
+.check_break:
+    cmp rax, POWER_BREAK            ; Power-up de break
+    jne .deactivate_powerup
+    mov qword [has_break], 1
 
-.deactivate:
+.deactivate_powerup:
     mov qword [powerup_active], 0
+    mov qword [powerup_type], 0
+    mov qword [powerup_counter], 0
 
 .done:
     ret
@@ -1454,11 +1847,13 @@ activate_slow_ball:
 
 activate_break:
     mov qword [has_break], 1
-    ; Calcular posición de la abertura basada en la posición de la paleta
-    mov qword [break_width], 5
     ret
 
 activate_extra_balls:
+    ; No activar bolas extra si la principal está perdida
+    cmp qword [ball_active], 0
+    je .done
+
     ; Incrementar contador de bolas activas
     add qword [active_balls_count], 2
 
@@ -1479,6 +1874,8 @@ activate_extra_balls:
     mov [ball3_y_pos], rax
     mov qword [ball3_dir_x], -1   ; Dirección inicial diferente
     mov qword [ball3_dir_y], -1
+
+.done:
     ret
 
 move_extra_balls:
@@ -1726,7 +2123,164 @@ move_extra_balls:
 .done:
     ret
 
+; Función para inicializar el nivel actual
+init_level:
+    push rbx
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push qword [score]  ; Guardar el score actual antes de inicializar
+
+    ; Reset board to initial state with borders
+    mov rcx, row_cells
+.draw_lines:
+    push rcx
+
+    ; Calculate current line position
+    mov rax, row_cells
+    sub rax, rcx
+    mov rbx, column_cells + 2
+    mul rbx
+    mov rdi, board
+    add rdi, rax
+
+    ; Draw left border
+    mov byte [rdi], 'X'
+
+    ; Draw middle (space)
+    mov rcx, column_cells - 2
+    inc rdi
+.fill_middle:
+    mov byte [rdi], ' '
+    inc rdi
+    loop .fill_middle
+
+    ; Draw right border
+    mov byte [rdi], 'X'
+    mov byte [rdi + 1], 0x0a
+    mov byte [rdi + 2], 0xD
+
+    pop rcx
+    loop .draw_lines
+
+    ; Draw top and bottom borders
+    mov rcx, column_cells
+    mov rdi, board
+.draw_top:
+    mov byte [rdi], 'X'
+    inc rdi
+    loop .draw_top
+
+    mov rcx, column_cells
+    mov rdi, board + (row_cells - 1) * (column_cells + 2)
+.draw_bottom:
+    mov byte [rdi], 'X'
+    inc rdi
+    loop .draw_bottom
+
+    ; Reset paddle position
+    mov rax, [initial_pallet_pos]
+    mov [pallet_position], rax
+
+    ; Reset blocks_state para asegurar un estado limpio
+    mov rcx, PATTERN_SIZE
+    mov rdi, blocks_state
+    mov al, 1  ; Inicializar todos los bloques como activos
+    rep stosb
+
+    ; Initialize blocks
+    mov rax, [level]
+    dec rax
+    mov rcx, PATTERN_SIZE
+    mul rcx
+    mov rbx, [level_patterns]
+    add rbx, rax
+
+    mov rax, [level]
+    dec rax
+    mov rcx, 8
+    mul rcx
+    lea rcx, [blocks_per_level]
+    mov rcx, [rcx + rax]
+    mov [blocks_left], rcx
+
+    ; Initialize blocks_state
+    xor r8, r8
+
+.init_loop:
+    cmp r8, PATTERN_SIZE
+    jge .restore_score
+
+    mov al, [rbx + r8]
+    cmp al, '#'
+    je .set_indestructible
+    cmp al, ' '
+    je .set_empty
+
+    mov byte [blocks_state + r8], 1
+    jmp .next_block
+
+.set_indestructible:
+    mov byte [blocks_state + r8], 2
+    jmp .next_block
+
+.set_empty:
+    mov byte [blocks_state + r8], 0
+
+.next_block:
+    inc r8
+    jmp .init_loop
+
+.restore_score:
+    pop qword [score]  ; Restaurar el score guardado
+
+    ; Asegurarse de que el estado del juego esté limpio
+    mov qword [blocks_destroyed], 0
+    mov qword [powerup_active], 0
+    mov qword [powerup_counter], 0
+
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+; Funcion para verificar que el nivel se ha completado
 check_level_complete:
+    push rax
+    push rbx
+
+    ; Verificar si quedan bloques
+    mov rax, [blocks_left]
+    test rax, rax            ; Comprueba si blocks_left = 0
+    jnz .not_complete
+
+    ; Incrementar nivel
+    inc qword [level]
+    mov rax, [level]
+    cmp rax, 6              ; Verificar si completamos el nivel 5
+    jg exit                 ; Si completamos el nivel 5, terminar el juego
+
+    ; Obtener el número de bloques para el siguiente nivel
+    dec rax                 ; Ajustar para índice base 0
+    mov rbx, 8              ; Tamaño de cada entrada
+    mul rbx
+    lea rbx, [blocks_per_level]
+    mov rax, [rbx + rax]    ; Obtener número de bloques del nuevo nivel
+    mov [blocks_left], rax  ; Establecer blocks_left para el nuevo nivel
+
+    ; Reinicializar el juego para el nuevo nivel
+    call init_level
+    call reset_positions
+    call deactivate_all_powerups
+    mov byte [game_started], 0
+
+.not_complete:
+    pop rbx
+    pop rax
+    retcheck_level_complete:
     push rax
     push rbx
 
@@ -1762,6 +2316,8 @@ check_level_complete:
     pop rbx
     pop rax
     ret
+
+
 
 _start:
     ; Inicializar variables
