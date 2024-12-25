@@ -509,7 +509,18 @@ section .data
     max_level dq 5               ; Número máximo de niveles
     blocks_increment dq 39       ; Incremento de bloques por nivellevel_complete db 0          ; Flag para indicar si el nivel está completo
 
-section .text
+    MAX_ENEMIES equ 3
+    ENEMY_CHAR db '@'
+    
+    ; Structure for each enemy: x_pos(8), y_pos(8), dir_x(8), dir_y(8), active(8)
+    enemies_data: times (MAX_ENEMIES * 40) db 0
+    enemy_count dq 0
+    enemy_spawn_rate dq 200
+    enemy_spawn_counter dq 0
+    enemy_move_rate dq 100        ; Larger number = slower movement 
+    enemy_move_counter dq 0
+
+ section .text
 
 generate_random:
     push rdx
@@ -785,6 +796,14 @@ move_ball:
 .ball_lost:
     mov qword [ball_active], 0
     dec qword [active_balls_count]
+    
+    ; Si hay bolas extra activas, convertir una en la principal
+    cmp qword [ball2_active], 1
+    je .convert_ball2_to_main
+    cmp qword [ball3_active], 1
+    je .convert_ball3_to_main
+    
+    ; Si no hay bolas extra, perder vida
     dec qword [lives]
     mov rax, [lives]
     test rax, rax
@@ -1482,16 +1501,33 @@ check_bullet_collision:
     imul rbx, BLOCKS_PER_ROW
     add rax, rbx
 
-    ; Verificar si hay un bloque
-    cmp byte [blocks_state + rax], 1
-    jne .no_collision
-
-    push rax                        ; Guardar el índice del bloque
-    call handle_block_destruction   ; Manejar la destrucción del bloque
+    ; Obtener el patrón del nivel actual
+    push rax
+    mov rbx, [level]
+    dec rbx
+    imul rbx, PATTERN_SIZE
+    mov rcx, [level_patterns]
+    add rcx, rbx
     pop rax
+    push rax
+
+    ; Verificar si hay un bloque en el patrón
+    movzx rbx, byte [rcx + rax]
+    cmp bl, ' '
+    je .pop_and_no_collision
+    
+    ; Verificar si el bloque está activo
+    cmp byte [blocks_state + rax], 0
+    je .pop_and_no_collision
+    
+    ; Verificar si es un bloque dorado
+    cmp bl, '#'
+    je .pop_and_no_collision
+
+    call handle_block_destruction
 
     ; Desactivar la bala actual
-    mov qword [bullet_active], 0    ; Este es el indicador temporal que afecta a la bala actual
+    mov qword [bullet_active], 0
 
     ; Determinar cuál bala fue y desactivarla específicamente
     mov rax, [bullet_x]
@@ -1502,14 +1538,20 @@ check_bullet_collision:
     mov rbx, [bullet_x_right]
     cmp rax, rbx
     je .deactivate_right
-    jmp .no_collision
+    jmp .pop_and_no_collision
 
 .deactivate_left:
     mov qword [bullet_active_left], 0
+    pop rax
     jmp .no_collision
 
 .deactivate_right:
     mov qword [bullet_active_right], 0
+    pop rax
+    jmp .no_collision
+
+.pop_and_no_collision:
+    pop rax
 
 .no_collision:
     pop rdx
@@ -1604,23 +1646,68 @@ print_bullet:
 
 ; Función para desactivar todos los power-ups
 deactivate_all_powerups:
-    mov qword [active_balls_count], 1
     mov qword [powerup_active], 0
     mov qword [powerup_type], 0
     mov qword [bullet_active_left], 0
     mov qword [bullet_active_right], 0
     mov qword [has_shooting], 0
     mov qword [ball_stuck], 0
-    mov qword [ball2_active], 0
-    mov qword [ball3_active], 0
     mov qword [has_catch], 0
     mov qword [has_enlarge], 0
-    mov rax, [default_pallet_size]    ; Restaurar tamaño normal de la paleta
+    mov rax, [default_pallet_size]
     mov [pallet_size], rax
-    mov qword [has_slow], 0           ; Desactivar el power-up de velocidad
-    mov rax, [ball_speed]             ; Restaurar velocidad normal
-    mov [ball_move], rax              ; Restaurar velocidad normal
+    mov qword [has_slow], 0
+    mov rax, [ball_speed]
+    mov [ball_move], rax
     mov qword [has_break], 0
+
+    ; Mantener una sola bola activa
+    cmp qword [ball_active], 1
+    je .keep_main_ball
+    
+    ; Si la principal no está activa, convertir ball2 o ball3 en principal
+    cmp qword [ball2_active], 1
+    je .convert_ball2
+    cmp qword [ball3_active], 1
+    je .convert_ball3
+    jmp .done
+
+.keep_main_ball:
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    jmp .done
+
+.convert_ball2:
+    mov qword [ball_active], 1
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    mov rax, [ball2_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball2_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball2_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball2_dir_y]
+    mov [ball_dir_y], rax
+    jmp .done
+
+.convert_ball3:
+    mov qword [ball_active], 1
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    mov rax, [ball3_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball3_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball3_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball3_dir_y]
+    mov [ball_dir_y], rax
+
+.done:
     ret
 
 ; Función para desactivar el power-up actual
@@ -1709,6 +1796,56 @@ update_powerup:
     cmp rcx, rdx
     jg .done                         ; Si está a la derecha, no hay colisión
 
+    ; Convertir una bola en principal si hay múltiples
+    cmp qword [active_balls_count], 1
+    jle .continue_powerup
+    
+    ; Si la bola principal está activa, mantenerla
+    cmp qword [ball_active], 1
+    je .keep_main_ball
+    
+    ; Si no, convertir ball2 o ball3 en principal
+    cmp qword [ball2_active], 1
+    je .convert_ball2_powerup
+    cmp qword [ball3_active], 1
+    je .convert_ball3_powerup
+    
+.keep_main_ball:
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    jmp .continue_powerup
+
+.convert_ball2_powerup:
+    mov qword [ball_active], 1
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    mov rax, [ball2_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball2_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball2_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball2_dir_y]
+    mov [ball_dir_y], rax
+    jmp .continue_powerup
+
+.convert_ball3_powerup:
+    mov qword [ball_active], 1
+    mov qword [ball2_active], 0
+    mov qword [ball3_active], 0
+    mov qword [active_balls_count], 1
+    mov rax, [ball3_x_pos]
+    mov [ball_x_pos], rax
+    mov rax, [ball3_y_pos]
+    mov [ball_y_pos], rax
+    mov rax, [ball3_dir_x]
+    mov [ball_dir_x], rax
+    mov rax, [ball3_dir_y]
+    mov [ball_dir_y], rax
+
+.continue_powerup:
     ; Desactivar cualquier power-up activo actual
     call deactivate_current_powerup
 
@@ -1718,24 +1855,28 @@ update_powerup:
     cmp rax, POWER_LASER            ; Power-up de disparo
     jne .check_life
     mov qword [has_shooting], 1
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_life:
     cmp rax, POWER_LIFE             ; Power-up de vida extra
     jne .check_balls
     inc qword [lives]
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_balls:
     cmp rax, POWER_BALLS            ; Power-up de bolas extra
     jne .check_catch
     call activate_extra_balls
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_catch:
     cmp rax, POWER_CATCH            ; Power-up sticky
     jne .check_enlarge
     mov qword [has_catch], 1
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_enlarge:
@@ -1744,6 +1885,7 @@ update_powerup:
     mov qword [has_enlarge], 1
     mov rax, [wide_pallet_size]
     mov [pallet_size], rax
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_slow:
@@ -1752,12 +1894,14 @@ update_powerup:
     mov qword [has_slow], 1
     mov rax, [slow_ball_speed]
     mov [ball_move], rax
+    add qword [score], 1000
     jmp .deactivate_powerup
 
 .check_break:
     cmp rax, POWER_BREAK            ; Power-up de break
     jne .deactivate_powerup
     mov qword [has_break], 1
+    add qword [score], 1000
 
 .deactivate_powerup:
     mov qword [powerup_active], 0
@@ -2232,6 +2376,9 @@ init_level:
     inc r8
     jmp .init_loop
 
+    mov qword [enemy_count], 0
+    mov qword [enemy_spawn_counter], 0
+
 .restore_score:
     pop qword [score]  ; Restaurar el score guardado
 
@@ -2246,6 +2393,7 @@ init_level:
     pop rcx
     pop rbx
     ret
+
 
 ; Funcion para verificar que el nivel se ha completado
 check_level_complete:
@@ -2317,7 +2465,387 @@ check_level_complete:
     pop rax
     ret
 
+init_enemy:
+    push rbx
+    push rcx
+    push rdx
+    
+    ; Find free enemy slot
+    mov rcx, 0
+    .find_slot:
+        cmp rcx, MAX_ENEMIES
+        jge .done
+        
+        mov rax, 40          ; Size of each enemy structure
+        mul rcx
+        lea rbx, [enemies_data + rax]
+        cmp qword [rbx + 32], 0  ; Check active flag
+        je .init_slot
+        
+        inc rcx
+        jmp .find_slot
+        
+    .init_slot:
+        mov rax, 40
+        mul rcx             ; rax = rcx * 40
+        lea rdi, [enemies_data + rax]  ; rdi = base address for this enemy
 
+        ; Set random X position
+        call generate_random
+        xor rdx, rdx
+        mov rbx, column_cells - 4
+        div rbx
+        add rdx, 2
+        mov [rdi], rdx          ; x_pos
+        
+        ; Set initial Y position
+        mov qword [rdi + 8], 2   ; y_pos
+        
+        ; Set random directions
+        call generate_random
+        and rax, 1
+        mov rbx, 2
+        mul rbx
+        sub rax, 1
+        mov [rdi + 16], rax     ; dir_x
+        
+        call generate_random
+        and rax, 1
+        mov rbx, 2
+        mul rbx
+        sub rax, 1
+        mov [rdi + 24], rax     ; dir_y
+        
+        ; Set active flag
+        mov qword [rdi + 32], 1
+        
+    .done:
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
+update_enemies:
+    push rbx
+    push rcx
+    push rdx
+    
+    inc qword [enemy_move_counter]
+    mov rax, [enemy_move_counter]
+    cmp rax, [enemy_move_rate]
+    jl .done
+    
+    mov qword [enemy_move_counter], 0
+    mov rcx, 0
+    .loop:
+        cmp rcx, MAX_ENEMIES
+        jge .done
+        
+        ; Check if enemy is active
+        mov rax, 40
+        mul rcx
+        lea rbx, [enemies_data + rax]
+        cmp qword [rbx + 32], 0
+        je .next_enemy
+        
+        ; Update X position
+        mov rax, [rbx]           ; x_pos
+        mov rdx, [rbx + 16]      ; dir_x
+        add rax, rdx
+        
+        ; Check X boundaries
+        cmp rax, 1
+        jle .reverse_x
+        cmp rax, column_cells-1
+        jge .reverse_x
+        mov [rbx], rax           ; Update x_pos
+        jmp .update_y
+        
+    .reverse_x:
+        neg qword [rbx + 16]     ; Reverse dir_x
+        jmp .update_y
+        
+    .update_y:
+        mov rax, [rbx + 8]       ; y_pos
+        mov rdx, [rbx + 24]      ; dir_y
+        add rax, rdx
+        
+        ; Check Y boundaries
+        cmp rax, 1
+        jle .reverse_y
+        cmp rax, row_cells-2
+        jge .deactivate_enemy
+        mov [rbx + 8], rax       ; Update y_pos
+        
+        ; Check collisions with blocks
+        push rcx
+        push rbx
+        call check_enemy_block_collision
+        pop rbx
+        pop rcx
+        cmp rax, 1
+        je .reverse_y
+        
+        ; Check collision with paddle
+        call check_enemy_paddle_collision
+        cmp rax, 1
+        je .deactivate_enemy
+        
+        ; Check collision with ball
+        call check_enemy_ball_collision
+        cmp rax, 1
+        je .deactivate_enemy
+        
+        ; Check collision with bullets
+        call check_enemy_bullet_collision
+        cmp rax, 1
+        je .deactivate_enemy
+        
+        jmp .next_enemy
+        
+    .reverse_y:
+        neg qword [rbx + 24]     ; Reverse dir_y
+        jmp .next_enemy
+        
+    .deactivate_enemy:
+        mov qword [rbx + 32], 0  ; Deactivate enemy
+        dec qword [enemy_count]
+        
+    .next_enemy:
+        inc rcx
+        jmp .loop
+        
+    .done:
+        ; Check if we should spawn a new enemy
+        inc qword [enemy_spawn_counter]
+        mov rax, [enemy_spawn_counter]
+        cmp rax, [enemy_spawn_rate]
+        jl .exit
+        
+        mov qword [enemy_spawn_counter], 0
+        mov rax, [enemy_count]
+        cmp rax, MAX_ENEMIES
+        jge .exit
+        
+        call init_enemy
+        
+    .exit:
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
+print_enemies:
+    push rbx
+    push rcx
+    push rdx
+    
+    mov rcx, 0
+    .loop:
+        cmp rcx, MAX_ENEMIES
+        jge .done
+        
+        mov rax, 40
+        mul rcx
+        lea rbx, [enemies_data + rax]
+        
+        cmp qword [rbx + 32], 0  ; Check if active
+        je .next_enemy
+        
+        ; Calculate position in board
+        mov rax, [rbx + 8]       ; y_pos
+        mov rdx, column_cells + 2
+        mul rdx
+        add rax, [rbx]           ; Add x_pos
+        add rax, board
+        
+        mov dl, [ENEMY_CHAR]
+        mov [rax], dl
+        
+    .next_enemy:
+        inc rcx
+        jmp .loop
+        
+    .done:
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
+check_enemy_block_collision:
+    ; rbx contains pointer to current enemy
+    push rbx
+    push rcx
+    push rdx
+    
+    mov rax, [rbx + 8]          ; y_pos
+    sub eax, BLOCK_START_ROW
+    cmp rax, 0
+    jl .no_collision
+    cmp rax, BLOCK_ROWS
+    jge .no_collision
+    
+    ; Calculate block index
+    mov rcx, [rbx]              ; x_pos
+    sub ecx, 1
+    mov rax, rcx
+    xor rdx, rdx
+    mov rbx, BLOCK_WIDTH + 1
+    div rbx
+    
+    cmp rax, BLOCKS_PER_ROW
+    jge .no_collision
+    
+    ; Check if block exists
+    mov rcx, BLOCKS_PER_ROW
+    mul rcx
+    add rax, rdx
+    
+    cmp byte [blocks_state + rax], 0
+    je .no_collision
+    
+    mov rax, 1                  ; Collision detected
+    jmp .done
+    
+.no_collision:
+    xor rax, rax                ; No collision
+    
+.done:
+    pop rdx
+    pop rcx
+    pop rbx
+    ret
+
+check_enemy_paddle_collision:
+    ; rbx contains pointer to current enemy
+    push rdx
+    push rcx
+    
+    mov rax, [rbx + 8]          ; y_pos
+    cmp rax, 27                 ; Paddle row
+    jne .no_collision
+    
+    mov rcx, [rbx]              ; x_pos
+    mov rdx, [pallet_position]
+    sub rdx, board
+    sub rdx, 27 * (column_cells + 2)
+    
+    cmp rcx, rdx
+    jl .no_collision
+    
+    add rdx, [pallet_size]
+    cmp rcx, rdx
+    jg .no_collision
+    
+    mov rax, 1                  ; Collision detected
+    jmp .done
+    
+.no_collision:
+    xor rax, rax                ; No collision
+    
+.done:
+    pop rcx
+    pop rdx
+    ret
+
+check_enemy_ball_collision:
+    ; rbx contains pointer to current enemy
+    push rdx
+    push rcx
+    
+    ; Check main ball
+    mov rax, [rbx + 8]          ; Enemy y_pos
+    cmp rax, [ball_y_pos]
+    jne .check_ball2
+    
+    mov rcx, [rbx]              ; Enemy x_pos
+    cmp rcx, [ball_x_pos]
+    jne .check_ball2
+    
+    mov rax, 1
+    jmp .done
+    
+.check_ball2:
+    cmp qword [ball2_active], 0
+    je .check_ball3
+    
+    mov rax, [rbx + 8]
+    cmp rax, [ball2_y_pos]
+    jne .check_ball3
+    
+    mov rcx, [rbx]
+    cmp rcx, [ball2_x_pos]
+    jne .check_ball3
+    
+    mov rax, 1
+    jmp .done
+    
+.check_ball3:
+    cmp qword [ball3_active], 0
+    je .no_collision
+    
+    mov rax, [rbx + 8]
+    cmp rax, [ball3_y_pos]
+    jne .no_collision
+    
+    mov rcx, [rbx]
+    cmp rcx, [ball3_x_pos]
+    jne .no_collision
+    
+    mov rax, 1
+    jmp .done
+    
+.no_collision:
+    xor rax, rax
+    
+.done:
+    pop rcx
+    pop rdx
+    ret
+
+check_enemy_bullet_collision:
+    ; rbx contains pointer to current enemy
+    push rdx
+    push rcx
+    
+    cmp qword [bullet_active_left], 0
+    je .check_right_bullet
+    
+    mov rax, [rbx + 8]          ; Enemy y_pos
+    cmp rax, [bullet_y_left]
+    jne .check_right_bullet
+    
+    mov rcx, [rbx]              ; Enemy x_pos
+    cmp rcx, [bullet_x_left]
+    jne .check_right_bullet
+    
+    mov qword [bullet_active_left], 0
+    mov rax, 1
+    jmp .done
+    
+.check_right_bullet:
+    cmp qword [bullet_active_right], 0
+    je .no_collision
+    
+    mov rax, [rbx + 8]
+    cmp rax, [bullet_y_right]
+    jne .no_collision
+    
+    mov rcx, [rbx]
+    cmp rcx, [bullet_x_right]
+    jne .no_collision
+    
+    mov qword [bullet_active_right], 0
+    mov rax, 1
+    jmp .done
+    
+.no_collision:
+    xor rax, rax
+    
+.done:
+    pop rcx
+    pop rdx
+    ret
 
 _start:
     ; Inicializar variables
@@ -2361,6 +2889,8 @@ _start:
         call print_ball
         call print_bullet
         call print_powerup
+        call update_enemies
+        call print_enemies
         call update_powerup
         print board, board_size
         call print_game_info
@@ -2434,5 +2964,5 @@ start_screen:
 exit:
 	call canonical_on
 	mov    rax, 60
-    mov    rdi, 0
-    syscall
+    	mov    rdi, 0
+    	syscall
