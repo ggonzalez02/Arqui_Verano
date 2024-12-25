@@ -2737,6 +2737,7 @@ check_enemy_paddle_collision:
     cmp rcx, rdx
     jg .no_collision
     
+    add qword [score], 100
     mov rax, 1                  ; Collision detected
     jmp .done
     
@@ -2761,7 +2762,7 @@ check_enemy_ball_collision:
     mov rcx, [rbx]              ; Enemy x_pos
     cmp rcx, [ball_x_pos]
     jne .check_ball2
-    
+    add qword [score], 100
     mov rax, 1
     jmp .done
     
@@ -2820,6 +2821,7 @@ check_enemy_bullet_collision:
     jne .check_right_bullet
     
     mov qword [bullet_active_left], 0
+    add qword [score], 100
     mov rax, 1
     jmp .done
     
